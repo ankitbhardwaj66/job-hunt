@@ -13,20 +13,20 @@
 
 ### Message Templates
 
-#### Tone 1: Professional & Direct
+#### Tone 1: Warm & Personal
 
-> Hi [Name],
+> Hey [Name],
 >
-> I came across [Company Name] and was impressed by the work your team is doing in [specific area].
+> Stumbled on [Company Name] and really liked what you guys are doing with [specific area] — had to reach out.
 >
-> I'm a software engineer currently exploring contract opportunities — anything from short-term project sprints to ongoing part-time technical support. I specialize in [your key skills, e.g., full-stack development, cloud infrastructure, DevOps].
+> So I'm a dev who does contract work with small teams. Full-stack, cloud stuff, DevOps — basically whatever needs building or fixing. I know smaller teams don't always need a full-time hire but could use an extra hand now and then.
 >
-> Small teams often need flexible tech help without the overhead of a full-time hire — if that sounds like something your team could benefit from, I'd love to have a quick chat.
+> You can check out some of my work here: ankitbhardwaj.in
 >
-> Happy to share my portfolio or past work. Would you be open to a brief conversation?
+> Anyway, no agenda here — just thought I'd say hi in case you ever need someone. Happy to chat anytime!
 >
-> Best,
-> [Your Name]
+> Cheers,
+> Ankit
 
 #### Tone 2: Casual & Friendly
 
@@ -34,30 +34,34 @@
 >
 > Been following [Company Name] for a bit — really cool what you're building!
 >
-> Quick intro: I'm a developer who works with small teams on a contract basis. Whether it's knocking out a feature backlog, fixing tech debt, setting up infrastructure, or just having an extra pair of hands during a crunch — I'm available and flexible.
+> Quick intro — I'm a dev who works with small teams on a contract basis. Need someone to knock out a feature backlog, clean up tech debt, set up infra, or just be an extra pair of hands during a crunch? That's kinda my thing.
 >
-> No pressure at all — just putting myself out there in case you ever need someone. Would love to connect either way!
+> Here's my site if you wanna see what I've been up to: ankitbhardwaj.in
+>
+> No pressure at all — just putting myself out there. Would love to connect either way!
 >
 > Cheers,
-> [Your Name]
+> Ankit
 
 #### Tone 3: Value-First & Consultative
 
-> Hi [Name],
+> Hey [Name],
 >
-> I noticed [Company Name] is growing — congratulations! Scaling a small team's tech is one of the trickiest parts of that journey.
+> Saw [Company Name] is growing — that's awesome! I know scaling tech with a small team can get hectic real fast.
 >
-> I help small tech companies (under 50 people) with contract-based engineering work — things like shipping features faster, improving code quality, migrating infrastructure, or filling skill gaps without committing to a full-time hire.
+> I do contract work with companies like yours — shipping features, cleaning up code, setting up pipelines, filling gaps when you need someone who can just jump in and get stuff done. No long onboarding, no overhead.
 >
 > A few things I've helped teams with recently:
 > - [Example: Migrated a monolith to microservices]
 > - [Example: Built CI/CD pipelines from scratch]
-> - [Example: Developed and shipped a customer-facing feature in 3 weeks]
+> - [Example: Shipped a customer-facing feature in 3 weeks]
 >
-> If any of that resonates, I'd be happy to hop on a 15-minute call — no pitch, just a conversation to see if there's a fit.
+> Here's my site for more context: ankitbhardwaj.in
 >
-> Regards,
-> [Your Name]
+> If any of that sounds useful, happy to hop on a quick call — totally informal, just a chat.
+>
+> Cheers,
+> Ankit
 
 ---
 
