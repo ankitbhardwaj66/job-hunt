@@ -1,0 +1,35 @@
+{
+  "search_keywords": [
+    "software company",
+    "tech startup",
+    "SaaS company",
+    "web development agency",
+    "AI startup",
+    "fintech startup",
+    "devops company",
+    "cloud services company"
+  ],
+  "company_size_filter": "1-50",
+  "target_roles": [
+    "CEO",
+    "CTO",
+    "Founder",
+    "Co-Founder",
+    "Tech Lead",
+    "Engineering Manager",
+    "VP of Engineering",
+    "Head of Engineering",
+    "Director of Engineering"
+  ],
+  "max_companies_per_run": 15,
+  "max_people_per_company": 5,
+  "delay_between_actions": {
+    "min_seconds": 3,
+    "max_seconds": 8
+  },
+  "delay_between_pages": {
+    "min_seconds": 5,
+    "max_seconds": 12
+  },
+  "output_file": "prospects.csv"
+}

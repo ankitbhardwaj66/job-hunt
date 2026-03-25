@@ -1,0 +1,14 @@
+# LinkedIn session data (contains auth cookies - DO NOT commit)
+.linkedin_session/
+
+# Seen profiles tracking
+.seen_profiles.json
+
+# Output data
+prospects.csv
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
