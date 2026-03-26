@@ -279,150 +279,129 @@ def search_companies(page, config):
                         break  # No more results
                     print(f"  Extracted {len(page_companies)} companies from page {page_num}")
 
-                # Build skip words from all search keywords + generic filler words
-                skip_words = set()
-                for kw in keywords:
-                    skip_words.add(kw.lower())
-                    for word in kw.lower().split():
-                        skip_words.add(word)
-                # Generic words that don't make a company name unique
-                filler_words = {
-                    # Connectors
-                    "and", "the", "of", "a", "an", "in", "for", "by", "page",
-                    "first", "best", "top", "leading", "new", "next", "gen",
-                    # Business suffixes
-                    "inc", "ltd", "llc", "pvt", "co", "corp", "group", "global",
-                    "solutions", "services", "enterprise", "initiative", "leaders",
-                    "markets", "search", "confidential", "stealth",
-                    # Org types
-                    "school", "academy", "lab", "labs", "hub", "network",
-                    "community", "club", "institute", "center", "centre",
-                    "factory", "incubator", "accelerator", "collective",
-                    "platform", "digital", "online", "pro", "plus",
-                    "studio", "forum", "mixer", "show", "expo",
-                    "exchange", "program", "programme", "free", "code",
-                    # Countries
-                    "india", "usa", "uk", "us", "china", "japan", "korea",
-                    "vietnam", "singapore", "indonesia", "malaysia", "thailand",
-                    "philippines", "pakistan", "bangladesh", "nepal", "sri lanka",
-                    "germany", "france", "spain", "italy", "netherlands", "sweden",
-                    "norway", "denmark", "finland", "poland", "switzerland",
-                    "australia", "canada", "brazil", "mexico", "argentina",
-                    "nigeria", "kenya", "south africa", "egypt", "uae", "dubai",
-                    "israel", "turkey", "russia", "ukraine", "ireland",
-                    "europe", "asia", "africa", "mena", "latam", "apac",
-                    # Major cities
-                    "london", "berlin", "paris", "mumbai", "delhi", "bangalore",
-                    "bengaluru", "hyderabad", "chennai", "pune", "kolkata",
-                    "new york", "san francisco", "seattle", "austin", "boston",
-                    "toronto", "sydney", "melbourne", "tokyo", "seoul",
-                    "shanghai", "beijing", "hong kong", "hanoi", "jakarta",
-                    "dubai", "tel aviv", "amsterdam", "stockholm", "lisbon",
-                }
-                # Also match multi-word locations as single tokens
-                _location_phrases = {
-                    "sri lanka", "south africa", "new york", "san francisco",
-                    "hong kong", "tel aviv", "new zealand",
-                }
-
-                for comp in page_companies:
-                    if len(companies) >= max_companies:
-                        break
-                    if comp["slug"] in seen_companies:
-                        print(f"    [skip] {comp['name']} — already prospected")
-                        continue
-
-                    orig_name = comp["name"].strip()
-                    name_lower = orig_name.lower()
-
-                    # Skip 0: Companies in the skip list (e.g. past employers)
-                    skip_companies = [s.lower() for s in config.get("skip_companies", [])]
-                    if any(sc in name_lower for sc in skip_companies):
-                        print(f"    [skip] {orig_name} — in skip list")
-                        continue
-
-                    # Skip 1: "Page by X" — these are LinkedIn pages, not company listings
-                    if name_lower.startswith("page by"):
-                        print(f"    [skip] {orig_name} — LinkedIn page, not a company")
-                        continue
-
-                    # Skip 2: Names containing "stealth mode"
-                    if "stealth mode" in name_lower:
-                        print(f"    [skip] {orig_name} — stealth mode company")
-                        continue
-
-                    # Skip 3: VC / investor firms — they don't need dev help
-                    vc_words = {"venture capital", "ventures", "capital", "investment",
-                                "angel", "fund", "vc "}
-                    if any(v in name_lower for v in vc_words):
-                        print(f"    [skip] {orig_name} — VC/investment firm")
-                        continue
-
-                    # Skip 4: Company name mentions a country — usually spammy/outsourcing
-                    country_names = {
-                        "usa", "india", "uk", "china", "japan", "korea", "vietnam",
-                        "singapore", "indonesia", "malaysia", "thailand", "philippines",
-                        "pakistan", "bangladesh", "nepal", "germany", "france", "spain",
-                        "italy", "netherlands", "sweden", "norway", "denmark", "finland",
-                        "poland", "switzerland", "australia", "canada", "brazil", "mexico",
-                        "argentina", "nigeria", "kenya", "south africa", "egypt", "uae",
-                        "dubai", "israel", "turkey", "russia", "ukraine", "ireland",
+                    # Build skip words from all search keywords + generic filler words
+                    skip_words = set()
+                    for kw in keywords:
+                        skip_words.add(kw.lower())
+                        for word in kw.lower().split():
+                            skip_words.add(word)
+                    filler_words = {
+                        "and", "the", "of", "a", "an", "in", "for", "by", "page",
+                        "first", "best", "top", "leading", "new", "next", "gen",
+                        "inc", "ltd", "llc", "pvt", "co", "corp", "group", "global",
+                        "solutions", "services", "enterprise", "initiative", "leaders",
+                        "markets", "search", "confidential", "stealth",
+                        "school", "academy", "lab", "labs", "hub", "network",
+                        "community", "club", "institute", "center", "centre",
+                        "factory", "incubator", "accelerator", "collective",
+                        "platform", "digital", "online", "pro", "plus",
+                        "studio", "forum", "mixer", "show", "expo",
+                        "exchange", "program", "programme", "free", "code",
+                        "india", "usa", "uk", "us", "china", "japan", "korea",
+                        "vietnam", "singapore", "indonesia", "malaysia", "thailand",
+                        "philippines", "pakistan", "bangladesh", "nepal", "sri lanka",
+                        "germany", "france", "spain", "italy", "netherlands", "sweden",
+                        "norway", "denmark", "finland", "poland", "switzerland",
+                        "australia", "canada", "brazil", "mexico", "argentina",
+                        "nigeria", "kenya", "south africa", "egypt", "uae", "dubai",
+                        "israel", "turkey", "russia", "ukraine", "ireland",
+                        "europe", "asia", "africa", "mena", "latam", "apac",
+                        "london", "berlin", "paris", "mumbai", "delhi", "bangalore",
+                        "bengaluru", "hyderabad", "chennai", "pune", "kolkata",
+                        "new york", "san francisco", "seattle", "austin", "boston",
+                        "toronto", "sydney", "melbourne", "tokyo", "seoul",
+                        "shanghai", "beijing", "hong kong", "hanoi", "jakarta",
+                        "dubai", "tel aviv", "amsterdam", "stockholm", "lisbon",
                     }
-                    name_words_lower = set(name_lower.replace("-", " ").replace(".", " ").split())
-                    if name_words_lower & country_names:
-                        print(f"    [skip] {orig_name} — contains country name")
-                        continue
-
-                    # Skip 5: Check full name for disqualifying org types
-                    disqualifying_types = {
-                        "incubator", "accelerator", "academy", "school",
-                        "bootcamp", "boot camp", "university", "college",
-                        "institute", "forum", "mixer", "show", "expo",
-                        "conference", "summit", "meetup", "podcast",
+                    _location_phrases = {
+                        "sri lanka", "south africa", "new york", "san francisco",
+                        "hong kong", "tel aviv", "new zealand",
                     }
-                    if any(dt in name_lower for dt in disqualifying_types):
-                        print(f"    [skip] {orig_name} — org type not a target company")
-                        continue
 
-                    # Skip 5: Generic/keyword-stuffed names
-                    check_name = name_lower
-                    for phrase in _location_phrases:
-                        check_name = check_name.replace(phrase, " ")
-                    # Remove taglines after " - " or " | "
-                    check_name = re.split(r'\s*[-|]\s*', check_name)[0].strip()
-                    name_words = [w for w in check_name.replace(".", " ").split() if w]
-                    meaningful_words = [w for w in name_words if w not in filler_words]
-                    if meaningful_words and all(w in skip_words for w in meaningful_words):
-                        print(f"    [skip] {orig_name} — generic/keyword name")
-                        continue
+                    for comp in page_companies:
+                        if len(companies) >= max_companies:
+                            break
+                        if comp["slug"] in seen_companies:
+                            print(f"    [skip] {comp['name']} — already prospected")
+                            continue
 
-                    # Skip 5: Community/event/edu names
-                    community_words = {
-                        "circle", "connect", "meetup", "event", "events",
-                        "summit", "conference", "podcast", "media",
-                        "magazine", "journal", "newsletter", "blog",
-                        "forum", "mixer", "show", "expo", "fest",
-                        "studio", "exchange", "program", "programme",
-                        "free", "code", "deep", "blue", "make", "it",
-                        "world", "worlds", "world's", "largest",
-                        "team", "at",
-                    }
-                    remaining_after_keywords = [w for w in meaningful_words if w not in skip_words]
-                    if not remaining_after_keywords:
-                        pass  # already caught above
-                    elif all(w in community_words for w in remaining_after_keywords):
-                        print(f"    [skip] {orig_name} — community/event/edu, not a company")
-                        continue
+                        orig_name = comp["name"].strip()
+                        name_lower = orig_name.lower()
 
-                    seen_companies.add(comp["slug"])
+                        skip_companies_list = [s.lower() for s in config.get("skip_companies", [])]
+                        if any(sc in name_lower for sc in skip_companies_list):
+                            print(f"    [skip] {orig_name} — in skip list")
+                            continue
 
-                    companies.append({
-                        "name": comp["name"],
-                        "slug": comp["slug"],
-                        "url": f"https://www.linkedin.com/company/{comp['slug']}/",
-                        "keyword": keyword,
-                    })
-                    print(f"    + {comp['name']}")
+                        if name_lower.startswith("page by"):
+                            print(f"    [skip] {orig_name} — LinkedIn page, not a company")
+                            continue
+
+                        if "stealth mode" in name_lower:
+                            print(f"    [skip] {orig_name} — stealth mode company")
+                            continue
+
+                        vc_words = {"venture capital", "ventures", "capital", "investment", "angel", "fund", "vc "}
+                        if any(v in name_lower for v in vc_words):
+                            print(f"    [skip] {orig_name} — VC/investment firm")
+                            continue
+
+                        country_names = {
+                            "usa", "india", "uk", "china", "japan", "korea", "vietnam",
+                            "singapore", "indonesia", "malaysia", "thailand", "philippines",
+                            "pakistan", "bangladesh", "nepal", "germany", "france", "spain",
+                            "italy", "netherlands", "sweden", "norway", "denmark", "finland",
+                            "poland", "switzerland", "australia", "canada", "brazil", "mexico",
+                            "argentina", "nigeria", "kenya", "south africa", "egypt", "uae",
+                            "dubai", "israel", "turkey", "russia", "ukraine", "ireland",
+                        }
+                        name_words_lower = set(name_lower.replace("-", " ").replace(".", " ").split())
+                        if name_words_lower & country_names:
+                            print(f"    [skip] {orig_name} — contains country name")
+                            continue
+
+                        disqualifying_types = {
+                            "incubator", "accelerator", "academy", "school",
+                            "bootcamp", "boot camp", "university", "college",
+                            "institute", "forum", "mixer", "show", "expo",
+                            "conference", "summit", "meetup", "podcast",
+                        }
+                        if any(dt in name_lower for dt in disqualifying_types):
+                            print(f"    [skip] {orig_name} — org type not a target company")
+                            continue
+
+                        check_name = name_lower
+                        for phrase in _location_phrases:
+                            check_name = check_name.replace(phrase, " ")
+                        check_name = re.split(r'\s*[-|]\s*', check_name)[0].strip()
+                        name_words = [w for w in check_name.replace(".", " ").split() if w]
+                        meaningful_words = [w for w in name_words if w not in filler_words]
+                        if meaningful_words and all(w in skip_words for w in meaningful_words):
+                            print(f"    [skip] {orig_name} — generic/keyword name")
+                            continue
+
+                        community_words = {
+                            "circle", "connect", "meetup", "event", "events",
+                            "summit", "conference", "podcast", "media",
+                            "magazine", "journal", "newsletter", "blog",
+                            "forum", "mixer", "show", "expo", "fest",
+                            "studio", "exchange", "program", "programme",
+                            "free", "code", "deep", "blue", "make", "it",
+                            "world", "worlds", "world's", "largest", "team", "at",
+                        }
+                        remaining_after_keywords = [w for w in meaningful_words if w not in skip_words]
+                        if remaining_after_keywords and all(w in community_words for w in remaining_after_keywords):
+                            print(f"    [skip] {orig_name} — community/event/edu, not a company")
+                            continue
+
+                        seen_companies.add(comp["slug"])
+                        companies.append({
+                            "name": comp["name"],
+                            "slug": comp["slug"],
+                            "url": f"https://www.linkedin.com/company/{comp['slug']}/",
+                            "keyword": keyword,
+                        })
+                        print(f"    + {comp['name']}")
 
                     action_delay(config)
 
