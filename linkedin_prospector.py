@@ -894,9 +894,24 @@ _LOCAL_MESSAGE_TEMPLATES = [
 ]
 
 
+_SALUTATIONS = {
+    "mr", "mr.", "mrs", "mrs.", "ms", "ms.", "dr", "dr.", "prof", "prof.",
+    "sir", "shri", "smt", "ca", "er", "er.", "ca.",
+}
+
+
+def _clean_first_name(name):
+    """Extract first name, skipping salutations like Mr., Mrs., Dr."""
+    parts = name.split() if name else []
+    for part in parts:
+        if part.lower().rstrip(".") not in {s.rstrip(".") for s in _SALUTATIONS}:
+            return part
+    return parts[-1] if parts else "there"
+
+
 def generate_message(person, local_mode=False, location=""):
     """Generate a personalized connection request message under 300 chars."""
-    first_name = person["name"].split()[0] if person["name"] else "there"
+    first_name = _clean_first_name(person["name"])
     company = person["company"]
     # Shorten company name if too long
     if len(company) > 40:
