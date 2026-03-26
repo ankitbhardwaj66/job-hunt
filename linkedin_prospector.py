@@ -902,7 +902,7 @@ def send_connection_request(page, person, config):
 FIELDNAMES = [
     "name", "company",
     "matched_role", "has_recent_activity", "recent_activity_30d",
-    "connection_degree", "found_date", "message", "connect_sent", "local",
+    "connection_degree", "found_date", "connect_sent", "local",
 ]
 
 _SALUTATIONS = {
