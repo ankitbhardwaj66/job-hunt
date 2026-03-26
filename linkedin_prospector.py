@@ -648,53 +648,84 @@ def send_connection_request(page, person, config):
         page.goto(person["profile_url"], wait_until="domcontentloaded")
         time.sleep(3)
 
+        # Extract first name for aria-label matching
+        first_name = person["name"].split()[0].lower() if person["name"] else ""
+        last_name = person["name"].split()[-1].lower() if person["name"] and len(person["name"].split()) > 1 else ""
+
         print(f"    [connect] Sending invitation to {person['name']} at {person['company']}")
         print(f"    [connect] Role: {person.get('matched_role', 'unknown')}")
         print(f"    [connect] Message: {message}")
 
-        # Use JS to find the correct Connect button on the profile page
-        # LinkedIn profile pages have the main action buttons in a specific section
+        # Use JS to find the Connect button that belongs to THIS person
+        # The aria-label contains the person's name e.g. "Invite John Doe to connect"
         connect_clicked = page.evaluate("""
-            () => {
-                // Look for Connect button in the main profile actions area
-                // These are the top-level action buttons on the profile
+            (firstName, lastName) => {
                 const buttons = document.querySelectorAll('button');
+                // First pass: find Connect button with matching name in aria-label
                 for (const btn of buttons) {
                     const text = btn.innerText.trim();
                     const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
-                    // Match exact "Connect" text or aria-label containing "connect"
-                    // but NOT "Message" or "Follow" buttons
-                    if ((text === 'Connect' || ariaLabel.includes('invite') || ariaLabel.includes('connect'))
-                        && !ariaLabel.includes('message')
-                        && btn.offsetParent !== null) {  // visible check
-                        btn.click();
-                        return 'main';
+                    if (text === 'Connect' && btn.offsetParent !== null) {
+                        // Check if aria-label contains the person's name
+                        if (ariaLabel.includes(firstName) && (lastName === '' || ariaLabel.includes(lastName))) {
+                            btn.click();
+                            return 'matched: ' + ariaLabel;
+                        }
+                    }
+                }
+                // Second pass: check the main profile action buttons area only
+                // These are typically in the first section before the feed
+                const mainSection = document.querySelector('.pv-top-card-v2-ctas, .pv-top-card__cta-container, .pvs-profile-actions');
+                if (mainSection) {
+                    const btns = mainSection.querySelectorAll('button');
+                    for (const btn of btns) {
+                        if (btn.innerText.trim() === 'Connect' && btn.offsetParent !== null) {
+                            btn.click();
+                            return 'main_section';
+                        }
                     }
                 }
                 return null;
             }
-        """)
+        """, first_name, last_name)
 
         if not connect_clicked:
-            # Try the "More" dropdown on the profile
+            # Try the "More" dropdown on the profile (Connect is sometimes hidden there)
             print(f"    [connect] No main Connect button, trying More dropdown...")
-            more_btn = page.query_selector('button[aria-label="More actions"], button:has-text("More")')
-            if more_btn and more_btn.is_visible():
-                more_btn.click()
+            # Find the More button near the top of the profile (not sidebar ones)
+            more_btn = page.evaluate("""
+                () => {
+                    const buttons = document.querySelectorAll('button');
+                    for (const btn of buttons) {
+                        const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+                        const text = btn.innerText.trim();
+                        if ((aria === 'more actions' || text === 'More') && btn.offsetParent !== null) {
+                            // Make sure it's near the top of the page (profile actions area)
+                            const rect = btn.getBoundingClientRect();
+                            if (rect.y < 500) {
+                                btn.click();
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                }
+            """)
+            if more_btn:
                 time.sleep(1.5)
-                # Look for Connect in dropdown
                 connect_clicked = page.evaluate("""
-                    () => {
+                    (firstName) => {
                         const items = document.querySelectorAll('[role="listbox"] li, .artdeco-dropdown__content li, .artdeco-dropdown__content-inner li');
                         for (const item of items) {
-                            if (item.innerText.trim().toLowerCase().includes('connect')) {
+                            const text = item.innerText.trim().toLowerCase();
+                            if (text.includes('connect')) {
                                 item.click();
                                 return 'dropdown';
                             }
                         }
                         return null;
                     }
-                """)
+                """, first_name)
                 if not connect_clicked:
                     page.keyboard.press("Escape")
 
