@@ -229,6 +229,8 @@ def search_companies(page, config):
                     "community", "club", "institute", "center", "centre",
                     "factory", "incubator", "accelerator", "collective",
                     "platform", "digital", "online", "pro", "plus",
+                    "studio", "forum", "mixer", "show", "expo",
+                    "exchange", "program", "programme", "free", "code",
                     # Countries
                     "india", "usa", "uk", "us", "china", "japan", "korea",
                     "vietnam", "singapore", "indonesia", "malaysia", "thailand",
@@ -279,7 +281,18 @@ def search_companies(page, config):
                         print(f"    [skip] {orig_name} — VC/investment firm")
                         continue
 
-                    # Skip 4: Generic/keyword-stuffed names
+                    # Skip 4: Check full name for disqualifying org types
+                    disqualifying_types = {
+                        "incubator", "accelerator", "academy", "school",
+                        "bootcamp", "boot camp", "university", "college",
+                        "institute", "forum", "mixer", "show", "expo",
+                        "conference", "summit", "meetup", "podcast",
+                    }
+                    if any(dt in name_lower for dt in disqualifying_types):
+                        print(f"    [skip] {orig_name} — org type not a target company")
+                        continue
+
+                    # Skip 5: Generic/keyword-stuffed names
                     check_name = name_lower
                     for phrase in _location_phrases:
                         check_name = check_name.replace(phrase, " ")
@@ -291,15 +304,22 @@ def search_companies(page, config):
                         print(f"    [skip] {orig_name} — generic/keyword name")
                         continue
 
-                    # Skip 5: Community/event names (circle, connect, etc. combined with keywords)
-                    community_words = {"circle", "connect", "meetup", "event",
-                                       "summit", "conference", "podcast", "media",
-                                       "magazine", "journal", "newsletter", "blog"}
+                    # Skip 5: Community/event/edu names
+                    community_words = {
+                        "circle", "connect", "meetup", "event", "events",
+                        "summit", "conference", "podcast", "media",
+                        "magazine", "journal", "newsletter", "blog",
+                        "forum", "mixer", "show", "expo", "fest",
+                        "studio", "exchange", "program", "programme",
+                        "free", "code", "deep", "blue", "make", "it",
+                        "world", "worlds", "world's", "largest",
+                        "team", "at",
+                    }
                     remaining_after_keywords = [w for w in meaningful_words if w not in skip_words]
                     if not remaining_after_keywords:
                         pass  # already caught above
                     elif all(w in community_words for w in remaining_after_keywords):
-                        print(f"    [skip] {orig_name} — community/event, not a company")
+                        print(f"    [skip] {orig_name} — community/event/edu, not a company")
                         continue
 
                     seen_companies.add(comp["slug"])
