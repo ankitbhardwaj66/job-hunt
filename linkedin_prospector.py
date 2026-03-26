@@ -436,7 +436,7 @@ def find_people_at_company(page, company, config, seen_profiles, local_mode=Fals
     """Find decision-makers at a given company."""
     people = []
     target_roles = [r.lower() for r in config["target_roles"]]
-    max_people = config["max_people_per_company"]
+    # No limit on finding — collect all, sort by priority, connect logic handles the cap
     # Ordered by priority — technical decision-makers first, then business roles
     role_patterns = [
         # Priority 1: Technical managers — most likely to hire contract devs
@@ -589,9 +589,7 @@ def find_people_at_company(page, company, config, seen_profiles, local_mode=Fals
 
     # Sort by role priority — CTOs and engineering managers first
     people.sort(key=lambda p: _role_priority.get(p.get("matched_role", ""), 99))
-    # Limit to max_people after sorting
-    if len(people) > max_people:
-        people = people[:max_people]
+    # No cap here — let do_search decide how many to connect with
 
     return people
 
@@ -1173,7 +1171,7 @@ def do_search(playwright, config, auto_connect=False, local_mode=False):
     config["_existing_slugs"] = existing_slugs
 
     print(f"Max companies: {config['max_companies_per_run']}")
-    print(f"Max people per company: {config['max_people_per_company']}")
+    print(f"Max connects per company: {config.get('max_connects_per_company', 2)}")
     print(f"Delays: {config['delay_between_actions']['min_seconds']}-{config['delay_between_actions']['max_seconds']}s between actions")
 
     browser = playwright.chromium.launch(
