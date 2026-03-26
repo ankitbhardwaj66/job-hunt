@@ -900,7 +900,7 @@ def send_connection_request(page, person, config):
 
 
 FIELDNAMES = [
-    "name", "profile_url", "company", "company_url",
+    "name", "company",
     "matched_role", "has_recent_activity", "recent_activity_30d",
     "connection_degree", "found_date", "message", "connect_sent", "local",
 ]
