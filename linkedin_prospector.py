@@ -620,6 +620,27 @@ def check_profile_activity(page, person, config, local_mode=False):
         if degree_badge:
             person["connection_degree"] = degree_badge.inner_text().strip()
 
+        # Extract person's location from profile
+        person_location = page.evaluate("""
+            () => {
+                // Location is usually in the profile top card
+                const locEl = document.querySelector('.text-body-small.inline.t-black--light.break-words');
+                if (locEl) return locEl.innerText.trim();
+                // Fallback selectors
+                const spans = document.querySelectorAll('span.text-body-small');
+                for (const s of spans) {
+                    const text = s.innerText.trim();
+                    if (text.includes(',') && (text.includes('India') || text.includes('England') || text.includes('United') || text.length > 5)) {
+                        return text;
+                    }
+                }
+                return '';
+            }
+        """)
+        if person_location:
+            person["person_location"] = person_location
+            print(f"    [location] {person['name']} is in {person_location}")
+
         # Check for "Open to work" badge — skip job seekers
         is_job_seeker = page.evaluate("""
             () => {
@@ -959,12 +980,23 @@ def _generate_message_ai(person, local_mode=False, location=""):
         role = person.get("matched_role", "")
         headline = person.get("headline", "")
 
+        person_location = person.get("person_location", "")
+
         local_context = ""
         if local_mode and location:
-            local_context = f"""
+            if person_location and location.lower() in person_location.lower():
+                # They're in the same city as us
+                local_context = f"""
 - I also live in {location} and work from home
 - Mention we're in the same city casually
 - Mention I'm open for contract work"""
+            else:
+                # They're in a different city/country — don't claim same city
+                local_context = f"""
+- I'm based in {location}, India, working from home
+- They are located in: {person_location or 'unknown'}
+- Do NOT say we're in the same city or 'fellow {location} person' — they're not local
+- Just mention I'm a remote engineer open to contract work"""
 
         prompt = f"""Write a LinkedIn connection request note. MUST be under 300 characters total.
 
