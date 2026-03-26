@@ -750,11 +750,9 @@ def send_connection_request(page, person, config):
                 print(f"    [connect] Could not find note field for {person['name']}")
                 page.keyboard.press("Escape")
         else:
-            # No "Add a note" — LinkedIn may have sent request without note
-            # Try to dismiss any modal first
+            # No "Add a note" — check if LinkedIn sent it without a note
             page.keyboard.press("Escape")
             time.sleep(1)
-            # Check if a "Pending" button appeared (means request was sent without note)
             pending = page.evaluate("""
                 () => {
                     const buttons = document.querySelectorAll('button');
@@ -767,38 +765,9 @@ def send_connection_request(page, person, config):
                 }
             """)
             if pending:
-                # Withdraw the request — we don't want to send without a note
-                print(f"    [connect] Request sent without note to {person['name']}, withdrawing...")
-                withdraw = page.evaluate("""
-                    () => {
-                        const buttons = document.querySelectorAll('button');
-                        for (const btn of buttons) {
-                            if (btn.innerText.trim().toLowerCase() === 'pending' && btn.offsetParent !== null) {
-                                btn.click();
-                                return true;
-                            }
-                        }
-                        return false;
-                    }
-                """)
-                if withdraw:
-                    time.sleep(1.5)
-                    # Confirm withdrawal
-                    page.evaluate("""
-                        () => {
-                            const buttons = document.querySelectorAll('button');
-                            for (const btn of buttons) {
-                                const text = btn.innerText.trim().toLowerCase();
-                                if ((text === 'withdraw' || text.includes('withdraw')) && btn.offsetParent !== null) {
-                                    btn.click();
-                                    return true;
-                                }
-                            }
-                            return false;
-                        }
-                    """)
-                    time.sleep(1)
-                    print(f"    [connect] Withdrawn for {person['name']}")
+                print(f"    [connect] SENT to {person['name']} at {person['company']} (without note)")
+                person["connect_sent"] = "sent_no_note"
+                return True
             else:
                 print(f"    [connect] No 'Add a note' option for {person['name']}, skipped")
 
