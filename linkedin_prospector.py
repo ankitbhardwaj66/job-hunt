@@ -659,7 +659,9 @@ def send_connection_request(page, person, config):
         # Use JS to find the Connect button that belongs to THIS person
         # The aria-label contains the person's name e.g. "Invite John Doe to connect"
         connect_clicked = page.evaluate("""
-            (firstName, lastName) => {
+            (names) => {
+                const firstName = names.first;
+                const lastName = names.last;
                 const buttons = document.querySelectorAll('button');
                 // First pass: find Connect button with matching name in aria-label
                 for (const btn of buttons) {
@@ -687,7 +689,7 @@ def send_connection_request(page, person, config):
                 }
                 return null;
             }
-        """, first_name, last_name)
+        """, {"first": first_name, "last": last_name})
 
         if not connect_clicked:
             # Try the "More" dropdown on the profile (Connect is sometimes hidden there)
