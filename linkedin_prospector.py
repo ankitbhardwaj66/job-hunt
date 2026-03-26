@@ -483,6 +483,7 @@ def find_people_at_company(page, company, config, seen_profiles, local_mode=Fals
                 "found_date": datetime.now().strftime("%Y-%m-%d"),
             }
             person["message"] = generate_message(person, local_mode=local_mode, location=location)
+            person["local"] = "yes" if local_mode else "no"
             people.append(person)
             seen_profiles.add(profile_url)
             print(f"    + {name} — {headline}")
@@ -664,7 +665,7 @@ def send_connection_request(page, person, config):
 FIELDNAMES = [
     "name", "profile_url", "company", "company_url",
     "matched_role", "has_recent_activity", "recent_posts_30d",
-    "connection_degree", "found_date", "message", "connect_sent",
+    "connection_degree", "found_date", "message", "connect_sent", "local",
 ]
 
 _MESSAGE_TEMPLATES = [
