@@ -31,6 +31,7 @@
     "min_seconds": 5,
     "max_seconds": 12
   },
+  "skip_companies": ["Netsmartz"],
   "output_file": "prospects.csv",
   "local_mode": {
     "location": "Chandigarh",

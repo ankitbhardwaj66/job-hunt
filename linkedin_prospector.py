@@ -267,6 +267,12 @@ def search_companies(page, config):
                     orig_name = comp["name"].strip()
                     name_lower = orig_name.lower()
 
+                    # Skip 0: Companies in the skip list (e.g. past employers)
+                    skip_companies = [s.lower() for s in config.get("skip_companies", [])]
+                    if any(sc in name_lower for sc in skip_companies):
+                        print(f"    [skip] {orig_name} — in skip list")
+                        continue
+
                     # Skip 1: "Page by X" — these are LinkedIn pages, not company listings
                     if name_lower.startswith("page by"):
                         print(f"    [skip] {orig_name} — LinkedIn page, not a company")
