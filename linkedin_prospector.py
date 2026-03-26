@@ -290,7 +290,22 @@ def search_companies(page, config):
                         print(f"    [skip] {orig_name} — VC/investment firm")
                         continue
 
-                    # Skip 4: Check full name for disqualifying org types
+                    # Skip 4: Company name mentions a country — usually spammy/outsourcing
+                    country_names = {
+                        "usa", "india", "uk", "china", "japan", "korea", "vietnam",
+                        "singapore", "indonesia", "malaysia", "thailand", "philippines",
+                        "pakistan", "bangladesh", "nepal", "germany", "france", "spain",
+                        "italy", "netherlands", "sweden", "norway", "denmark", "finland",
+                        "poland", "switzerland", "australia", "canada", "brazil", "mexico",
+                        "argentina", "nigeria", "kenya", "south africa", "egypt", "uae",
+                        "dubai", "israel", "turkey", "russia", "ukraine", "ireland",
+                    }
+                    name_words_lower = set(name_lower.replace("-", " ").replace(".", " ").split())
+                    if name_words_lower & country_names:
+                        print(f"    [skip] {orig_name} — contains country name")
+                        continue
+
+                    # Skip 5: Check full name for disqualifying org types
                     disqualifying_types = {
                         "incubator", "accelerator", "academy", "school",
                         "bootcamp", "boot camp", "university", "college",
