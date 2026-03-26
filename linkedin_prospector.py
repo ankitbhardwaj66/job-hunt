@@ -167,27 +167,62 @@ def extract_companies_from_page(page):
     return found
 
 
-def _load_existing_company_slugs(config):
-    """Load company slugs from existing CSV to skip already-prospected companies."""
+def _get_sheets_client(config):
+    """Get authenticated gspread client and sheet."""
+    import gspread
+    from google.oauth2.service_account import Credentials
+
+    gs_config = config.get("google_sheets", {})
+    key_path = gs_config.get("service_account_key", "")
+    if not os.path.isabs(key_path):
+        key_path = str(SCRIPT_DIR / key_path)
+    key_path = os.path.expanduser(key_path)
+
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive.readonly",
+    ]
+    creds = Credentials.from_service_account_file(key_path, scopes=scopes)
+    gc = gspread.authorize(creds)
+    sheet = gc.open_by_url(gs_config["sheet_url"]).sheet1
+    return sheet
+
+
+def _load_existing_from_sheet(config):
+    """Load existing data from Google Sheet — company slugs and profile URLs."""
     slugs = set()
-    output_file = SCRIPT_DIR / config["output_file"]
-    if output_file.exists():
-        with open(output_file, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                url = row.get("company_url", "")
-                match = re.search(r'/company/([^/?]+)', url)
+    profile_urls = set()
+    try:
+        sheet = _get_sheets_client(config)
+        data = sheet.get_all_values()
+        if not data:
+            return slugs, profile_urls
+
+        header = data[0]
+        company_col = header.index("company_url") if "company_url" in header else -1
+        profile_col = header.index("profile_url") if "profile_url" in header else -1
+
+        for row in data[1:]:
+            if company_col >= 0 and len(row) > company_col:
+                match = re.search(r'/company/([^/?]+)', row[company_col])
                 if match:
                     slugs.add(match.group(1))
-    if slugs:
-        print(f"Loaded {len(slugs)} already-prospected companies from CSV")
-    return slugs
+            if profile_col >= 0 and len(row) > profile_col:
+                if row[profile_col]:
+                    profile_urls.add(row[profile_col])
+
+        print(f"Loaded from Google Sheet: {len(slugs)} companies, {len(profile_urls)} profiles")
+    except Exception as e:
+        print(f"Warning: Could not load from Google Sheet: {e}")
+        print("Continuing without dedup...")
+
+    return slugs, profile_urls
 
 
 def search_companies(page, config):
     """Search LinkedIn for small tech companies and return company info."""
     companies = []
-    seen_companies = _load_existing_company_slugs(config)
+    seen_companies = config.get("_existing_slugs", set())
     max_companies = config["max_companies_per_run"]
     keywords = config["search_keywords"]
     geo_id = config.get("_geo_id", "")  # set by do_search for local mode
@@ -881,86 +916,54 @@ def generate_message(person, local_mode=False, location=""):
 
 
 def save_prospects(prospects, config):
-    """Save prospects to CSV and optionally sync to Google Sheets."""
-    output_file = SCRIPT_DIR / config["output_file"]
-    file_exists = output_file.exists()
-
-    with open(output_file, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=FIELDNAMES, extrasaction="ignore")
-        if not file_exists:
-            writer.writeheader()
-        for person in prospects:
-            writer.writerow(person)
-
-    print(f"\nSaved {len(prospects)} prospects to {output_file}")
-
-    # Sync to Google Sheets if configured
-    gs_config = config.get("google_sheets", {})
-    if gs_config.get("enabled") and gs_config.get("sheet_url"):
-        sync_to_google_sheets(config)
-
-
-def sync_to_google_sheets(config):
-    """Read full CSV and sync it to Google Sheets (append new rows, skip duplicates)."""
-    try:
-        import gspread
-        from google.oauth2.service_account import Credentials
-    except ImportError:
-        print("  [sheets] gspread not installed. Run: pip install gspread google-auth")
-        return
-
-    gs_config = config["google_sheets"]
-    # Resolve relative path from script directory
-    key_path = gs_config["service_account_key"]
-    if not os.path.isabs(key_path):
-        key_path = str(SCRIPT_DIR / key_path)
-    key_path = os.path.expanduser(key_path)
-
-    if not os.path.exists(key_path):
-        print(f"  [sheets] Service account key not found at {key_path}")
+    """Save prospects directly to Google Sheet."""
+    if not prospects:
+        print("\nNo new prospects to save.")
         return
 
     try:
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive.readonly",
-        ]
-        creds = Credentials.from_service_account_file(key_path, scopes=scopes)
-        gc = gspread.authorize(creds)
-        sheet = gc.open_by_url(gs_config["sheet_url"]).sheet1
-
-        # Get existing profile URLs from sheet to avoid duplicates
+        sheet = _get_sheets_client(config)
         existing_data = sheet.get_all_values()
-        if existing_data:
-            header = existing_data[0]
-            if "profile_url" in header:
-                url_col = header.index("profile_url")
-                existing_urls = {row[url_col] for row in existing_data[1:] if len(row) > url_col}
-            else:
-                existing_urls = set()
-                sheet.update(values=[FIELDNAMES], range_name="A1")
+
+        # Ensure header exists
+        if not existing_data:
+            sheet.update(values=[FIELDNAMES], range_name="A1")
+            existing_data = [FIELDNAMES]
+
+        # Get existing profile URLs to avoid duplicates
+        header = existing_data[0]
+        if "profile_url" in header:
+            url_col = header.index("profile_url")
+            existing_urls = {row[url_col] for row in existing_data[1:] if len(row) > url_col}
         else:
             existing_urls = set()
-            sheet.update(values=[FIELDNAMES], range_name="A1")
 
-        # Read all prospects from CSV
-        output_file = SCRIPT_DIR / config["output_file"]
+        # Build new rows (skip duplicates)
         new_rows = []
-        with open(output_file, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                if row.get("profile_url") not in existing_urls:
-                    new_rows.append([row.get(field, "") for field in FIELDNAMES])
+        for person in prospects:
+            if person.get("profile_url") not in existing_urls:
+                new_rows.append([str(person.get(field, "")) for field in FIELDNAMES])
 
         if new_rows:
-            next_row = len(existing_data) + 1 if existing_data else 2
+            next_row = len(existing_data) + 1
             sheet.update(values=new_rows, range_name=f"A{next_row}")
-            print(f"  [sheets] Added {len(new_rows)} new rows to Google Sheet")
+            print(f"\n  [sheets] Added {len(new_rows)} new prospects to Google Sheet")
         else:
-            print(f"  [sheets] No new rows to add (all already in sheet)")
+            print(f"\n  [sheets] No new prospects to add (all already in sheet)")
 
     except Exception as e:
-        print(f"  [sheets] Error syncing to Google Sheets: {e}")
+        print(f"\n  [sheets] Error saving to Google Sheet: {e}")
+        # Fallback: save to local CSV so data isn't lost
+        print("  [sheets] Saving to local CSV as fallback...")
+        output_file = SCRIPT_DIR / "prospects_fallback.csv"
+        file_exists = output_file.exists()
+        with open(output_file, "a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=FIELDNAMES, extrasaction="ignore")
+            if not file_exists:
+                writer.writeheader()
+            for person in prospects:
+                writer.writerow(person)
+        print(f"  Saved {len(prospects)} prospects to {output_file}")
 
 
 def do_search(playwright, config, auto_connect=False, local_mode=False):
@@ -985,6 +988,10 @@ def do_search(playwright, config, auto_connect=False, local_mode=False):
     else:
         print("\n--- LinkedIn Prospector ---")
 
+    # Load existing data from Google Sheet
+    existing_slugs, existing_profiles = _load_existing_from_sheet(config)
+    config["_existing_slugs"] = existing_slugs
+
     print(f"Max companies: {config['max_companies_per_run']}")
     print(f"Max people per company: {config['max_people_per_company']}")
     print(f"Delays: {config['delay_between_actions']['min_seconds']}-{config['delay_between_actions']['max_seconds']}s between actions")
@@ -1001,7 +1008,7 @@ def do_search(playwright, config, auto_connect=False, local_mode=False):
     page = context.new_page()
     page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
-    seen_profiles = load_seen_profiles()
+    seen_profiles = existing_profiles  # from Google Sheet
     all_prospects = []
 
     try:
@@ -1037,7 +1044,7 @@ def do_search(playwright, config, auto_connect=False, local_mode=False):
         # Save results
         if all_prospects:
             save_prospects(all_prospects, config)
-            save_seen_profiles(seen_profiles)
+            pass  # profiles tracked in Google Sheet
         else:
             print("\nNo matching prospects found this run. Try adjusting search keywords in config.json.")
 
@@ -1048,12 +1055,12 @@ def do_search(playwright, config, auto_connect=False, local_mode=False):
         print("\n\nInterrupted! Saving what we have so far...")
         if all_prospects:
             save_prospects(all_prospects, config)
-            save_seen_profiles(seen_profiles)
+            pass  # profiles tracked in Google Sheet
     except Exception as e:
         print(f"\nUnexpected error: {e}")
         if all_prospects:
             save_prospects(all_prospects, config)
-            save_seen_profiles(seen_profiles)
+            pass  # profiles tracked in Google Sheet
     finally:
         try:
             browser.close()
