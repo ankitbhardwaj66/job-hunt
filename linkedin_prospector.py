@@ -771,40 +771,23 @@ def send_connection_request(page, person, config):
             """)
             if more_btn:
                 time.sleep(2)
-                # Try multiple selectors — LinkedIn dropdown structure varies
-                connect_clicked = page.evaluate("""
-                    () => {
-                        // Strategy 1: Any visible element with text "Connect" in dropdown areas
-                        const dropdowns = document.querySelectorAll(
-                            '.artdeco-dropdown__content, [role="listbox"], .artdeco-dropdown__content-inner, .pvs-overflow-actions-dropdown__content'
-                        );
-                        for (const dd of dropdowns) {
-                            const items = dd.querySelectorAll('li, div[role="option"], a, span');
-                            for (const item of items) {
-                                if (item.innerText.trim() === 'Connect' && item.offsetParent !== null) {
-                                    item.click();
-                                    return 'dropdown_exact';
-                                }
-                            }
-                        }
-                        // Strategy 2: Any visible span/div with exact text "Connect" that appeared recently
-                        const allEls = document.querySelectorAll('span, div, li');
-                        for (const el of allEls) {
-                            if (el.innerText.trim() === 'Connect'
-                                && el.offsetParent !== null
-                                && el.closest('.artdeco-dropdown, [class*="dropdown"], [class*="overflow"]')) {
-                                el.click();
-                                return 'dropdown_broad';
-                            }
-                        }
-                        return null;
-                    }
-                """)
+                # Take screenshot for debugging
+                DEBUG_DIR.mkdir(exist_ok=True)
+                page.screenshot(path=str(DEBUG_DIR / "dropdown_open.png"), full_page=False)
+
+                # Use Playwright's native click — much more reliable than JS for dropdowns
+                try:
+                    # Look for "Connect" text in the dropdown using Playwright locators
+                    connect_item = page.locator('text="Connect"').first
+                    if connect_item.is_visible(timeout=3000):
+                        connect_item.click()
+                        connect_clicked = "dropdown"
+                        time.sleep(2)
+                except Exception:
+                    pass
+
                 if not connect_clicked:
                     page.keyboard.press("Escape")
-                else:
-                    # Extra wait after dropdown connect — modal takes longer to appear
-                    time.sleep(2)
 
         if not connect_clicked:
             print(f"    [connect] No Connect button found for {person['name']}")
