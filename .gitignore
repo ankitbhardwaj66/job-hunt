@@ -7,6 +7,9 @@
 # Output data
 prospects.csv
 
+# Debug snapshots
+debug/
+
 # Python
 __pycache__/
 *.pyc

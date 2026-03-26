@@ -1,5 +1,46 @@
 # Contract Job Hunting Strategy
 
+## Profile Optimization (Do This First)
+
+**Current:** CKAD & AWS Certified | SRE / DevOps Engineer | Kubernetes, Python, Bash, AWS Cloud, Cost Optimization, Cloud Migrations
+
+**Change headline to:**
+> SRE / DevOps Engineer | Kubernetes, AWS, Cloud Migrations | Available for Contract Work | ankitbhardwaj.in
+
+**Other changes:**
+- Turn OFF the green "Open to work" photo frame (keep the setting enabled — recruiters still see it, but you don't look desperate)
+- Add ankitbhardwaj.in to the **Contact Info** section and **Featured** section
+- Add a **Featured** section with:
+  - Link to ankitbhardwaj.in
+  - A pinned post about your contract availability
+  - 1-2 project showcases or case studies
+- Update **About** section (see below)
+
+**About section — replace with this:**
+
+> 10+ years building and running cloud infrastructure. I help teams ship faster, stay up, and spend less on AWS.
+>
+> What I do:
+> - Kubernetes setups, migrations, and management (CKAD certified)
+> - AWS infrastructure & cost optimization (AWS Solutions Architect certified)
+> - CI/CD pipelines with Terraform, Kubernetes, and Codefresh
+> - Microservices in Python, containerization, cloud-native architecture
+>
+> Industries: healthcare, finance, telecom
+>
+> Currently open to contract/consulting work — if your team needs DevOps or SRE help without the overhead of a full-time hire, let's talk.
+>
+> ankitbhardwaj.in
+- Start posting 2-3x per week to boost visibility:
+  - Quick Kubernetes or AWS tips
+  - "Today I debugged X" stories
+  - Share an article with your hot take
+  - Cost optimization wins (people love saving money)
+
+**Why this matters:** When someone gets your connection request or message, they WILL check your profile. A profile that says "I'm available and here's proof I'm good" converts way better than one that reads like a resume.
+
+---
+
 ## Strategy 1: LinkedIn Direct Outreach to Small Tech Companies
 
 **Target:** CEOs, CTOs, Tech Leads of companies with ~50 or fewer employees.
@@ -8,6 +49,15 @@
 - Search LinkedIn for companies by size filter (1-50 employees), industry (Technology)
 - Look at "People" tab of those companies and identify decision-makers
 - Engage with their posts before cold messaging (like, comment for a week or two)
+
+**Two-step approach (connect first, message later):**
+1. Send a connection request with a short note (300 char limit):
+   > Hey [Name], saw what you're building at [Company] — really cool stuff. I work in DevOps/Cloud (Kubernetes, AWS) and love following what small teams are doing. Would love to connect!
+2. Wait 1-2 days after they accept
+3. Then send one of the full message templates below
+4. If no reply, follow up after 5-7 days
+
+**Why connect first:** Messages from 1st connections land in the main inbox. Messages from 3rd+ connections go to "Other" — most people never check it.
 
 ---
 
@@ -19,7 +69,7 @@
 >
 > Stumbled on [Company Name] and really liked what you guys are doing with [specific area] — had to reach out.
 >
-> So I'm a dev who does contract work with small teams. Full-stack, cloud stuff, DevOps — basically whatever needs building or fixing. I know smaller teams don't always need a full-time hire but could use an extra hand now and then.
+> So I'm a DevOps/SRE guy who does contract work with small teams — Kubernetes, AWS, CI/CD pipelines, cloud migrations, cost optimization. I know smaller teams don't always need a full-time hire but could use an extra hand now and then.
 >
 > You can check out some of my work here: ankitbhardwaj.in
 >
@@ -34,7 +84,7 @@
 >
 > Been following [Company Name] for a bit — really cool what you're building!
 >
-> Quick intro — I'm a dev who works with small teams on a contract basis. Need someone to knock out a feature backlog, clean up tech debt, set up infra, or just be an extra pair of hands during a crunch? That's kinda my thing.
+> Quick intro — I'm a DevOps/SRE engineer who works with small teams on a contract basis. Need someone to set up your cloud infra, sort out your Kubernetes setup, build CI/CD pipelines, or cut your AWS bill? That's kinda my thing.
 >
 > Here's my site if you wanna see what I've been up to: ankitbhardwaj.in
 >
@@ -49,12 +99,12 @@
 >
 > Saw [Company Name] is growing — that's awesome! I know scaling tech with a small team can get hectic real fast.
 >
-> I do contract work with companies like yours — shipping features, cleaning up code, setting up pipelines, filling gaps when you need someone who can just jump in and get stuff done. No long onboarding, no overhead.
+> I do contract DevOps/SRE work with companies like yours — setting up cloud infra, Kubernetes, CI/CD pipelines, cutting AWS costs, and just keeping things running smooth so your devs can ship faster. No long onboarding, no overhead.
 >
 > A few things I've helped teams with recently:
-> - [Example: Migrated a monolith to microservices]
-> - [Example: Built CI/CD pipelines from scratch]
-> - [Example: Shipped a customer-facing feature in 3 weeks]
+> - Set up Kubernetes clusters and automated deployments from scratch
+> - Cut AWS bills by 30-40% through cost optimization
+> - Built CI/CD pipelines that took deploy times from hours to minutes
 >
 > Here's my site for more context: ankitbhardwaj.in
 >

@@ -17,6 +17,7 @@ import csv
 import json
 import os
 import random
+import re
 import sys
 import time
 from datetime import datetime
@@ -28,6 +29,7 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 SCRIPT_DIR = Path(__file__).parent
 CONFIG_PATH = SCRIPT_DIR / "config.json"
 SESSION_DIR = SCRIPT_DIR / ".linkedin_session"
+DEBUG_DIR = SCRIPT_DIR / "debug"
 PROSPECTS_SEEN_FILE = SCRIPT_DIR / ".seen_profiles.json"
 
 
@@ -112,6 +114,59 @@ def do_login(playwright):
     browser.close()
 
 
+def debug_snapshot(page, name):
+    """Save screenshot and HTML dump for debugging."""
+    DEBUG_DIR.mkdir(exist_ok=True)
+    ts = datetime.now().strftime("%H%M%S")
+    page.screenshot(path=str(DEBUG_DIR / f"{name}_{ts}.png"), full_page=True)
+    html = page.content()
+    with open(DEBUG_DIR / f"{name}_{ts}.html", "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"  [debug] Saved snapshot: debug/{name}_{ts}.png")
+
+
+def extract_companies_from_page(page):
+    """Extract company info from current search results page using multiple strategies."""
+    found = []
+
+    # Strategy 1: Find all links containing /company/ and extract from them
+    all_links = page.eval_on_selector_all(
+        'a[href*="/company/"]',
+        """els => els.map(el => ({
+            href: el.href,
+            text: el.innerText.trim(),
+            parentText: el.closest('li') ? el.closest('li').innerText.trim() : ''
+        }))"""
+    )
+
+    seen_slugs = set()
+    for link_info in all_links:
+        href = link_info.get("href", "")
+        match = re.search(r'/company/([^/?]+)', href)
+        if not match:
+            continue
+        slug = match.group(1)
+
+        # Skip navigation/generic links
+        if slug in seen_slugs or slug in ("company", "companies"):
+            continue
+        # Skip links that are sub-pages like /company/foo/life
+        after_slug = href.split(f"/company/{slug}")[-1].strip("/").split("?")[0]
+        if after_slug and after_slug not in ("", "about"):
+            continue
+
+        seen_slugs.add(slug)
+
+        # Get company name from link text or parent
+        text = link_info.get("text", "").split("\n")[0].strip()
+        if not text or len(text) > 100:
+            text = slug.replace("-", " ").title()
+
+        found.append({"name": text, "slug": slug})
+
+    return found
+
+
 def search_companies(page, config):
     """Search LinkedIn for small tech companies and return company info."""
     companies = []
@@ -119,7 +174,6 @@ def search_companies(page, config):
     max_companies = config["max_companies_per_run"]
     keywords = config["search_keywords"]
 
-    # Shuffle keywords so each run explores different searches
     random.shuffle(keywords)
 
     for keyword in keywords:
@@ -127,54 +181,50 @@ def search_companies(page, config):
             break
 
         print(f"\nSearching for: {keyword}")
-        search_url = f"https://www.linkedin.com/search/results/companies/?keywords={quote(keyword)}&companySize=%5B%22B%22%5D"
-        # companySize B = 1-10, C = 11-50. We search B first.
-        # We'll also try C in a second pass.
 
-        for size_code in ["%22B%22", "%22C%22"]:
+        for size_code in ["B", "C"]:
             if len(companies) >= max_companies:
                 break
 
-            url = f"https://www.linkedin.com/search/results/companies/?keywords={quote(keyword)}&companySize=%5B{size_code}%5D"
+            url = f"https://www.linkedin.com/search/results/companies/?keywords={quote(keyword)}&companySize=%5B%22{size_code}%22%5D"
 
             try:
                 page.goto(url, wait_until="domcontentloaded")
-                page_delay(config)
+                # Wait for search results to render
+                time.sleep(3)
+                # Scroll to trigger lazy loading
                 random_scroll(page)
+                time.sleep(2)
+                random_scroll(page)
+                time.sleep(1)
 
-                # Get company cards from search results
-                company_links = page.query_selector_all('a.app-aware-link[href*="/company/"]')
+                # Try to wait for result list items
+                try:
+                    page.wait_for_selector('a[href*="/company/"]', timeout=8000)
+                except PlaywrightTimeout:
+                    print(f"  No company links found for '{keyword}' (size {size_code})")
+                    debug_snapshot(page, f"no_results_{keyword.replace(' ', '_')}_{size_code}")
+                    continue
 
-                for link in company_links:
+                page_companies = extract_companies_from_page(page)
+                print(f"  Extracted {len(page_companies)} companies from page")
+
+                for comp in page_companies:
                     if len(companies) >= max_companies:
                         break
-
-                    href = link.get_attribute("href")
-                    if not href or "/company/" not in href:
+                    if comp["slug"] in seen_companies:
                         continue
-
-                    # Extract company slug
-                    parts = href.split("/company/")
-                    if len(parts) < 2:
-                        continue
-                    slug = parts[1].strip("/").split("?")[0].split("/")[0]
-
-                    if slug in seen_companies or not slug:
-                        continue
-                    seen_companies.add(slug)
-
-                    # Try to get company name from the link text
-                    name_el = link.query_selector("span[dir='ltr'] > span[aria-hidden='true']")
-                    company_name = name_el.inner_text().strip() if name_el else slug
+                    seen_companies.add(comp["slug"])
 
                     companies.append({
-                        "name": company_name,
-                        "slug": slug,
-                        "url": f"https://www.linkedin.com/company/{slug}/",
+                        "name": comp["name"],
+                        "slug": comp["slug"],
+                        "url": f"https://www.linkedin.com/company/{comp['slug']}/",
                         "keyword": keyword,
                     })
-                    print(f"  Found: {company_name}")
-                    action_delay(config)
+                    print(f"    + {comp['name']}")
+
+                action_delay(config)
 
             except PlaywrightTimeout:
                 print(f"  Timeout searching for {keyword}, moving on...")
@@ -185,92 +235,133 @@ def search_companies(page, config):
     return companies
 
 
+def extract_people_from_page(page):
+    """Extract people info from current search results using JS evaluation."""
+    results = page.eval_on_selector_all(
+        'li',
+        """els => els.map(el => {
+            const link = el.querySelector('a[href*="/in/"]');
+            if (!link) return null;
+            const href = link.href;
+            const allText = el.innerText.trim();
+            const lines = allText.split('\\n').map(l => l.trim()).filter(l => l.length > 0);
+            return { href, lines, text: allText };
+        }).filter(x => x !== null)"""
+    )
+    return results
+
+
 def find_people_at_company(page, company, config, seen_profiles):
     """Find decision-makers at a given company."""
     people = []
     target_roles = [r.lower() for r in config["target_roles"]]
     max_people = config["max_people_per_company"]
+    role_patterns = ["founder", "co-founder", "ceo", "cto", "coo", "chief",
+                     "head of", "vp ", "vice president", "director", "lead",
+                     "engineering manager", "tech lead"]
 
     print(f"\n  Looking for decision-makers at {company['name']}...")
 
-    # Search for people at this company
-    people_url = f"https://www.linkedin.com/search/results/people/?currentCompany=%5B%22{company['slug']}%22%5D&keywords={quote(company['name'])}"
+    # Visit the company's people page directly
+    people_url = f"https://www.linkedin.com/company/{company['slug']}/people/"
 
     try:
         page.goto(people_url, wait_until="domcontentloaded")
-        page_delay(config)
+        time.sleep(3)
         random_scroll(page)
+        time.sleep(2)
 
-        # Get people results
-        result_items = page.query_selector_all('li.reusable-search__result-container')
+        # Try waiting for any profile links
+        try:
+            page.wait_for_selector('a[href*="/in/"]', timeout=8000)
+        except PlaywrightTimeout:
+            # Fallback: try search-based approach
+            print(f"    No people on company page, trying search...")
+            search_url = f"https://www.linkedin.com/search/results/people/?keywords={quote(company['name'])}"
+            page.goto(search_url, wait_until="domcontentloaded")
+            time.sleep(3)
+            random_scroll(page)
+            time.sleep(2)
+            try:
+                page.wait_for_selector('a[href*="/in/"]', timeout=8000)
+            except PlaywrightTimeout:
+                print(f"    No people found for {company['name']}")
+                return people
 
-        for item in result_items:
+        raw_people = extract_people_from_page(page)
+        print(f"    Extracted {len(raw_people)} people entries from page")
+
+        for entry in raw_people:
             if len(people) >= max_people:
                 break
 
-            try:
-                # Get profile link
-                profile_link = item.query_selector('a.app-aware-link[href*="/in/"]')
-                if not profile_link:
-                    continue
+            href = entry.get("href", "")
+            match = re.search(r'/in/([^/?]+)', href)
+            if not match:
+                continue
+            profile_url = f"https://www.linkedin.com/in/{match.group(1)}"
 
-                profile_url = profile_link.get_attribute("href")
-                if not profile_url:
-                    continue
-                profile_url = profile_url.split("?")[0]
-
-                if profile_url in seen_profiles:
-                    continue
-
-                # Get name
-                name_el = item.query_selector('span[dir="ltr"] > span[aria-hidden="true"]')
-                name = name_el.inner_text().strip() if name_el else "Unknown"
-
-                # Get headline/title
-                headline_el = item.query_selector('div.entity-result__primary-subtitle')
-                headline = headline_el.inner_text().strip() if headline_el else ""
-
-                # Check if this person has a target role
-                headline_lower = headline.lower()
-                matched_role = None
-                for role in target_roles:
-                    if role in headline_lower:
-                        matched_role = role
-                        break
-
-                # Also check for common patterns
-                if not matched_role:
-                    role_patterns = ["founder", "ceo", "cto", "chief", "head of", "vp ", "director", "lead"]
-                    for pattern in role_patterns:
-                        if pattern in headline_lower:
-                            matched_role = pattern
-                            break
-
-                if not matched_role:
-                    continue
-
-                # Check if they seem active (has recent activity indicator)
-                # We can't always tell from search, but having a headline is a good sign
-                is_likely_active = len(headline) > 10
-
-                person = {
-                    "name": name,
-                    "headline": headline,
-                    "profile_url": profile_url,
-                    "company": company["name"],
-                    "company_url": company["url"],
-                    "matched_role": matched_role,
-                    "likely_active": is_likely_active,
-                    "found_date": datetime.now().strftime("%Y-%m-%d"),
-                }
-                people.append(person)
-                seen_profiles.add(profile_url)
-                print(f"    Found: {name} — {headline}")
-
-            except Exception as e:
+            if profile_url in seen_profiles:
                 continue
 
-            action_delay(config)
+            lines = entry.get("lines", [])
+            text = entry.get("text", "").lower()
+
+            # First non-empty line is usually the name
+            name = lines[0] if lines else "Unknown"
+            # Look for headline in the text lines
+            headline = ""
+            for line in lines[1:6]:
+                line_lower = line.lower()
+                for role in target_roles + role_patterns:
+                    if role in line_lower:
+                        headline = line
+                        break
+                if headline:
+                    break
+
+            # If no headline found from lines, check all text
+            if not headline:
+                matched = False
+                for role in target_roles + role_patterns:
+                    if role in text:
+                        matched = True
+                        # Try to find the line containing the role
+                        for line in lines[1:]:
+                            if role in line.lower():
+                                headline = line
+                                break
+                        if not headline:
+                            headline = role.title()
+                        break
+                if not matched:
+                    continue
+
+            headline_lower = headline.lower()
+            matched_role = None
+            for role in target_roles + role_patterns:
+                if role in headline_lower:
+                    matched_role = role
+                    break
+
+            if not matched_role:
+                continue
+
+            person = {
+                "name": name,
+                "headline": headline,
+                "profile_url": profile_url,
+                "company": company["name"],
+                "company_url": company["url"],
+                "matched_role": matched_role,
+                "likely_active": len(headline) > 10,
+                "found_date": datetime.now().strftime("%Y-%m-%d"),
+            }
+            people.append(person)
+            seen_profiles.add(profile_url)
+            print(f"    + {name} — {headline}")
+
+        action_delay(config)
 
     except PlaywrightTimeout:
         print(f"  Timeout looking at {company['name']}, moving on...")
