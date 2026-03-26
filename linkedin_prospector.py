@@ -259,19 +259,47 @@ def search_companies(page, config):
                     if comp["slug"] in seen_companies:
                         continue
 
-                    # Skip companies whose name is mostly generic/keyword words
-                    # e.g. "SaaS Company", "Saas and Enterprise Software Company"
-                    name_lower = comp["name"].lower().strip()
-                    # Remove multi-word locations first
+                    orig_name = comp["name"].strip()
+                    name_lower = orig_name.lower()
+
+                    # Skip 1: "Page by X" — these are LinkedIn pages, not company listings
+                    if name_lower.startswith("page by"):
+                        print(f"    [skip] {orig_name} — LinkedIn page, not a company")
+                        continue
+
+                    # Skip 2: Names containing "stealth mode"
+                    if "stealth mode" in name_lower:
+                        print(f"    [skip] {orig_name} — stealth mode company")
+                        continue
+
+                    # Skip 3: VC / investor firms — they don't need dev help
+                    vc_words = {"venture capital", "ventures", "capital", "investment",
+                                "angel", "fund", "vc "}
+                    if any(v in name_lower for v in vc_words):
+                        print(f"    [skip] {orig_name} — VC/investment firm")
+                        continue
+
+                    # Skip 4: Generic/keyword-stuffed names
+                    check_name = name_lower
                     for phrase in _location_phrases:
-                        name_lower = name_lower.replace(phrase, " ")
-                    # Remove anything after " - " (taglines like "the first AI agency in Vietnam")
-                    name_lower = name_lower.split(" - ")[0].strip()
-                    name_words = [w for w in name_lower.replace(".", " ").split() if w]
-                    # Remove filler words, then check if remaining are all skip words
+                        check_name = check_name.replace(phrase, " ")
+                    # Remove taglines after " - " or " | "
+                    check_name = re.split(r'\s*[-|]\s*', check_name)[0].strip()
+                    name_words = [w for w in check_name.replace(".", " ").split() if w]
                     meaningful_words = [w for w in name_words if w not in filler_words]
                     if meaningful_words and all(w in skip_words for w in meaningful_words):
-                        print(f"    [skip] {comp['name']} — generic/keyword name")
+                        print(f"    [skip] {orig_name} — generic/keyword name")
+                        continue
+
+                    # Skip 5: Community/event names (circle, connect, etc. combined with keywords)
+                    community_words = {"circle", "connect", "meetup", "event",
+                                       "summit", "conference", "podcast", "media",
+                                       "magazine", "journal", "newsletter", "blog"}
+                    remaining_after_keywords = [w for w in meaningful_words if w not in skip_words]
+                    if not remaining_after_keywords:
+                        pass  # already caught above
+                    elif all(w in community_words for w in remaining_after_keywords):
+                        print(f"    [skip] {orig_name} — community/event, not a company")
                         continue
 
                     seen_companies.add(comp["slug"])
