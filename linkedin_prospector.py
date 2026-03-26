@@ -441,14 +441,27 @@ def find_people_at_company(page, company, config, seen_profiles, local_mode=Fals
     people = []
     target_roles = [r.lower() for r in config["target_roles"]]
     max_people = config["max_people_per_company"]
-    role_patterns = ["founder", "co-founder", "ceo", "cto", "coo", "cmo", "cpo",
-                     "chief executive", "chief technology", "chief operating",
-                     "chief product", "chief marketing",
-                     "head of engineering", "head of product", "head of technology",
-                     "vp of", "vp ", "vice president",
-                     "director of engineering", "director of technology",
-                     "engineering manager", "tech lead", "technical lead",
-                     "managing director"]
+    # Ordered by priority — technical decision-makers first, then business roles
+    role_patterns = [
+        # Priority 1: Technical managers — most likely to hire contract devs
+        "cto", "chief technology",
+        "engineering manager", "tech lead", "technical lead",
+        "head of engineering", "head of technology", "head of product",
+        "vp of engineering", "vp of technology",
+        "director of engineering", "director of technology",
+        # Priority 2: Other C-level / VP
+        "coo", "chief operating", "cmo", "cpo",
+        "chief product", "chief marketing",
+        "vp of", "vp ", "vice president",
+        "managing director",
+        # Priority 3: Business roles — CEO/Founder (may not be technical)
+        "ceo", "chief executive",
+        "founder", "co-founder",
+    ]
+    # Map roles to priority numbers (lower = better)
+    _role_priority = {}
+    for i, role in enumerate(role_patterns):
+        _role_priority[role] = i
     # Words that disqualify a person even if a role keyword matched
     exclude_patterns = [
         # Individual contributors / engineers
@@ -502,8 +515,6 @@ def find_people_at_company(page, company, config, seen_profiles, local_mode=Fals
         print(f"    Extracted {len(raw_people)} people entries from page")
 
         for entry in raw_people:
-            if len(people) >= max_people:
-                break
 
             href = entry.get("href", "")
             match = re.search(r'/in/([^/?]+)', href)
@@ -574,6 +585,12 @@ def find_people_at_company(page, company, config, seen_profiles, local_mode=Fals
         print(f"  Timeout looking at {company['name']}, moving on...")
     except Exception as e:
         print(f"  Error at {company['name']}: {e}")
+
+    # Sort by role priority — CTOs and engineering managers first
+    people.sort(key=lambda p: _role_priority.get(p.get("matched_role", ""), 99))
+    # Limit to max_people after sorting
+    if len(people) > max_people:
+        people = people[:max_people]
 
     return people
 
