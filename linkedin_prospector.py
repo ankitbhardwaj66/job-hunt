@@ -688,19 +688,27 @@ def send_connection_request(page, person, config):
         print(f"    [connect] Clicked Connect ({connect_clicked}), waiting for modal...")
         time.sleep(3)
 
-        # Look for "Add a note" button in the modal
-        add_note_btn = page.evaluate("""
-            () => {
-                const buttons = document.querySelectorAll('button');
-                for (const btn of buttons) {
-                    if (btn.innerText.trim().toLowerCase().includes('add a note') && btn.offsetParent !== null) {
-                        btn.click();
-                        return true;
+        # Look for "Add a note" button in the modal — try multiple times
+        add_note_btn = False
+        for attempt in range(3):
+            add_note_btn = page.evaluate("""
+                () => {
+                    const buttons = document.querySelectorAll('button');
+                    for (const btn of buttons) {
+                        const text = btn.innerText.trim().toLowerCase();
+                        if ((text.includes('add a note') || text.includes('add note'))
+                            && btn.offsetParent !== null) {
+                            btn.click();
+                            return true;
+                        }
                     }
+                    return false;
                 }
-                return false;
-            }
-        """)
+            """)
+            if add_note_btn:
+                break
+            print(f"    [connect] Waiting for 'Add a note' button (attempt {attempt + 1}/3)...")
+            time.sleep(2)
 
         if add_note_btn:
             time.sleep(1.5)
@@ -742,9 +750,57 @@ def send_connection_request(page, person, config):
                 print(f"    [connect] Could not find note field for {person['name']}")
                 page.keyboard.press("Escape")
         else:
-            # No "Add a note" — dismiss the modal, we only send with notes
+            # No "Add a note" — LinkedIn may have sent request without note
+            # Try to dismiss any modal first
             page.keyboard.press("Escape")
-            print(f"    [connect] No 'Add a note' option for {person['name']}, skipped")
+            time.sleep(1)
+            # Check if a "Pending" button appeared (means request was sent without note)
+            pending = page.evaluate("""
+                () => {
+                    const buttons = document.querySelectorAll('button');
+                    for (const btn of buttons) {
+                        if (btn.innerText.trim().toLowerCase() === 'pending' && btn.offsetParent !== null) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+            """)
+            if pending:
+                # Withdraw the request — we don't want to send without a note
+                print(f"    [connect] Request sent without note to {person['name']}, withdrawing...")
+                withdraw = page.evaluate("""
+                    () => {
+                        const buttons = document.querySelectorAll('button');
+                        for (const btn of buttons) {
+                            if (btn.innerText.trim().toLowerCase() === 'pending' && btn.offsetParent !== null) {
+                                btn.click();
+                                return true;
+                            }
+                        }
+                        return false;
+                    }
+                """)
+                if withdraw:
+                    time.sleep(1.5)
+                    # Confirm withdrawal
+                    page.evaluate("""
+                        () => {
+                            const buttons = document.querySelectorAll('button');
+                            for (const btn of buttons) {
+                                const text = btn.innerText.trim().toLowerCase();
+                                if ((text === 'withdraw' || text.includes('withdraw')) && btn.offsetParent !== null) {
+                                    btn.click();
+                                    return true;
+                                }
+                            }
+                            return false;
+                        }
+                    """)
+                    time.sleep(1)
+                    print(f"    [connect] Withdrawn for {person['name']}")
+            else:
+                print(f"    [connect] No 'Add a note' option for {person['name']}, skipped")
 
         person["connect_sent"] = False
         return False
