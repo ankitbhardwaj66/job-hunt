@@ -903,23 +903,6 @@ FIELDNAMES = [
     "connection_degree", "found_date", "message", "connect_sent", "local",
 ]
 
-_MESSAGE_TEMPLATES = [
-    "Hey {first_name}! Stumbled on {company} and thought it looked really cool. I'm a dev who works with small teams — backend, cloud, DevOps stuff. Would be great to connect!",
-    "Hey {first_name}, came across {company} and liked what you guys are up to. I do backend and cloud work with small teams. Let's connect!",
-    "Hey {first_name}! Been checking out {company} — cool stuff. I'm into backend dev, AWS, Kubernetes, that kinda thing. Would love to connect!",
-    "Hey {first_name}, saw {company} and had to reach out. I work with small teams on backend and infra — always cool to meet folks building interesting things. Let's connect!",
-    "Hey {first_name}! {company} looks awesome. I'm a dev who does backend, cloud, and DevOps with small teams. Would love to be in your network!",
-]
-
-_LOCAL_MESSAGE_TEMPLATES = [
-    "Hey {first_name}! I'm based in {location} too and came across {company} — cool to see what you guys are building here. I'm a software engineer, work from home, and open for contract work. Would love to connect!",
-    "Hey {first_name}, nice to see {company} in {location}! I live here too and work remotely as a dev — backend, cloud, DevOps. Always looking to connect with local tech folks. Let's connect!",
-    "Hey {first_name}! Fellow {location} person here. Saw {company} and loved what you're doing. I'm a software engineer working from home, open to contract gigs. Would be great to connect locally!",
-    "Hey {first_name}, saw {company} is in {location} — same here! I'm a dev working from home, into backend and cloud stuff. Would love to connect and see if I can help out sometime!",
-    "Hey {first_name}! Cool to find {company} right here in {location}. I work remotely as a software engineer and I'm open for contract work. Let's connect — always great to know local tech people!",
-]
-
-
 _SALUTATIONS = {
     "mr", "mr.", "mrs", "mrs.", "ms", "ms.", "dr", "dr.", "prof", "prof.",
     "sir", "shri", "smt", "ca", "er", "er.", "ca.",
@@ -935,24 +918,87 @@ def _clean_first_name(name):
     return parts[-1] if parts else "there"
 
 
-def generate_message(person, local_mode=False, location=""):
-    """Generate a personalized connection request message under 300 chars."""
+def _generate_message_ai(person, local_mode=False, location=""):
+    """Use Claude to draft a natural, casual connection request under 300 chars."""
+    try:
+        import anthropic
+        client = anthropic.Anthropic()
+
+        first_name = _clean_first_name(person["name"])
+        company = person["company"]
+        role = person.get("matched_role", "")
+        headline = person.get("headline", "")
+
+        local_context = ""
+        if local_mode and location:
+            local_context = f"""
+- I also live in {location} and work from home
+- Mention we're in the same city casually
+- Mention I'm open for contract work"""
+
+        prompt = f"""Write a LinkedIn connection request note. MUST be under 300 characters total.
+
+About me: Ankit, software engineer (backend, DevOps, AWS, Kubernetes), work from home, open to contract work.
+Website: ankitbhardwaj.in
+
+About them:
+- Name: {first_name}
+- Company: {company}
+- Role: {role}
+- Headline: {headline}
+{local_context}
+
+Rules:
+- MUST be under 300 characters (this is a hard LinkedIn limit)
+- Start with "Hey {first_name}"
+- Use the short/common name of their company, not the full legal name or tagline
+- Sound like a real person texting, not a recruiter or bot
+- Keep it casual and friendly
+- Don't use corporate words like "synergy", "leverage", "opportunity"
+- Don't mention my website
+- End with something like "Would love to connect!" or "Let's connect!"
+- Just output the message, nothing else"""
+
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=150,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        msg = response.content[0].text.strip().strip('"')
+
+        # Safety check
+        if len(msg) > 300:
+            msg = msg[:297] + "..."
+        return msg
+
+    except Exception as e:
+        print(f"    [ai] Error generating message: {e}")
+        return None
+
+
+def _generate_message_fallback(person, local_mode=False, location=""):
+    """Fallback template-based message if AI is unavailable."""
     first_name = _clean_first_name(person["name"])
-    company = person["company"]
-    # Shorten company name if too long
-    if len(company) > 40:
-        company = company[:37] + "..."
+    company = person["company"].split(" - ")[0].split(" | ")[0].strip()
+    if len(company) > 30:
+        company = company[:27] + "..."
 
     if local_mode and location:
-        template = random.choice(_LOCAL_MESSAGE_TEMPLATES)
-        msg = template.format(first_name=first_name, company=company, location=location)
+        msg = f"Hey {first_name}! Fellow {location} person here. Saw {company} and liked what you're doing. I'm a software engineer, WFH, open for contract work. Would love to connect locally!"
     else:
-        template = random.choice(_MESSAGE_TEMPLATES)
-        msg = template.format(first_name=first_name, company=company)
+        msg = f"Hey {first_name}! Came across {company} and liked what you guys are up to. I'm a dev who works with small teams — backend, cloud, DevOps. Would love to connect!"
 
-    # Ensure under 300 chars
     if len(msg) > 300:
         msg = msg[:297] + "..."
+    return msg
+
+
+def generate_message(person, local_mode=False, location=""):
+    """Generate a personalized connection request message under 300 chars."""
+    # Try AI first, fall back to template
+    msg = _generate_message_ai(person, local_mode, location)
+    if not msg:
+        msg = _generate_message_fallback(person, local_mode, location)
     return msg
 
 
