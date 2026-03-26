@@ -12,6 +12,10 @@ Usage:
     Both:       python linkedin_prospector.py --login --search
 """
 
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", message=".*urllib3.*")
+
 import argparse
 import csv
 import json
