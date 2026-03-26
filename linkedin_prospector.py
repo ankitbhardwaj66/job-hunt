@@ -353,11 +353,22 @@ def find_people_at_company(page, company, config, seen_profiles):
                      "engineering manager", "tech lead", "technical lead",
                      "managing director"]
     # Words that disqualify a person even if a role keyword matched
-    exclude_patterns = ["trainer", "trainee", "intern", "student", "faculty",
-                        "content", "designer", "graphic", "recruiter", "hr ",
-                        "human resource", "marketing executive", "sales executive",
-                        "freelancer", "volunteer", "teaching", "teacher",
-                        "e-learning", "sme", "academician"]
+    exclude_patterns = [
+        # Individual contributors / engineers
+        "developer", "engineer", "architect", "programmer", "coder",
+        "full stack", "fullstack", "frontend", "backend", "devops engineer",
+        "sre", "data scientist", "data analyst", "ml engineer",
+        "qa", "tester", "testing",
+        # Non-tech / non-decision-maker roles
+        "trainer", "trainee", "intern", "student", "faculty",
+        "content", "designer", "graphic", "recruiter", "hr ",
+        "human resource", "marketing executive", "sales executive",
+        "sales rep", "account manager", "account executive",
+        "freelancer", "volunteer", "teaching", "teacher",
+        "e-learning", "sme", "academician", "instructor",
+        "consultant", "analyst", "coordinator", "associate",
+        "practitioner", "specialist",
+    ]
 
     print(f"\n  Looking for decision-makers at {company['name']}...")
 
@@ -408,44 +419,16 @@ def find_people_at_company(page, company, config, seen_profiles):
 
             # First non-empty line is usually the name
             name = lines[0] if lines else "Unknown"
-            # Look for headline in the text lines
-            headline = ""
-            for line in lines[1:6]:
-                line_lower = line.lower()
-                # Check exclusions first — skip this line if it has disqualifying words
-                if any(ex in line_lower for ex in exclude_patterns):
-                    continue
-                for role in target_roles + role_patterns:
-                    if role in line_lower:
-                        headline = line
-                        break
-                if headline:
-                    break
 
-            # If no headline found from lines, check all text
-            if not headline:
-                # Check exclusions on full text
-                if any(ex in text for ex in exclude_patterns):
-                    continue
-                matched = False
-                for role in target_roles + role_patterns:
-                    if role in text:
-                        matched = True
-                        for line in lines[1:]:
-                            if role in line.lower():
-                                headline = line
-                                break
-                        if not headline:
-                            headline = role.title()
-                        break
-                if not matched:
-                    continue
+            # Combine all text lines into one headline for matching
+            # LinkedIn headlines are often split across multiple lines
+            full_headline = " | ".join(lines[1:6]) if len(lines) > 1 else ""
+            headline_lower = full_headline.lower()
 
-            headline_lower = headline.lower()
-            # Final exclusion check on matched headline
-            if any(ex in headline_lower for ex in exclude_patterns):
+            if not headline_lower:
                 continue
 
+            # Check if they have a decision-maker role
             matched_role = None
             for role in target_roles + role_patterns:
                 if role in headline_lower:
@@ -454,6 +437,20 @@ def find_people_at_company(page, company, config, seen_profiles):
 
             if not matched_role:
                 continue
+
+            # If they ONLY have excluded roles (developer, engineer, etc.)
+            # and no decision-maker title, skip them.
+            # But if they're e.g. "DevOps Engineer | Founder" — keep them.
+            has_exclude = any(ex in headline_lower for ex in exclude_patterns)
+            if has_exclude:
+                # Check if their decision-maker role is a strong one (founder, C-level, VP, head)
+                strong_roles = ["founder", "co-founder", "ceo", "cto", "coo", "cmo", "cpo",
+                                "chief", "head of", "vp ", "vice president", "managing director"]
+                has_strong_role = any(sr in headline_lower for sr in strong_roles)
+                if not has_strong_role:
+                    continue
+
+            headline = full_headline
 
             person = {
                 "name": name,
@@ -569,6 +566,10 @@ def send_connection_request(page, person, config):
             print(f"    [connect] No message for {person['name']}, skipping")
             return False
 
+        print(f"\n    [connect] Sending invitation to {person['name']} at {person['company']}")
+        print(f"    [connect] Role: {person.get('matched_role', 'unknown')}")
+        print(f"    [connect] Message: {message}")
+
         # Try clicking the main "Connect" button
         connect_clicked = False
         connect_btn = page.query_selector('button:has-text("Connect")')
@@ -616,7 +617,7 @@ def send_connection_request(page, person, config):
                 if send_btn:
                     send_btn.click()
                     time.sleep(2)
-                    print(f"    [connect] Sent request to {person['name']}")
+                    print(f"    [connect] SENT to {person['name']} at {person['company']}")
                     person["connect_sent"] = True
                     return True
             else:
