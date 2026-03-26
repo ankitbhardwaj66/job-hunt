@@ -397,6 +397,9 @@ def find_people_at_company(page, company, config, seen_profiles, local_mode=Fals
         "e-learning", "sme", "academician", "instructor",
         "consultant", "analyst", "coordinator", "associate",
         "practitioner", "specialist",
+        # Job seekers — they're looking for work, not hiring
+        "available for", "looking for", "seeking", "open to work",
+        "actively looking", "job search", "hire me",
     ]
 
     print(f"\n  Looking for decision-makers at {company['name']}...")
@@ -599,89 +602,144 @@ def check_profile_activity(page, person, config):
 
 
 def send_connection_request(page, person, config):
-    """Send a connection request with a personalized note from the profile page."""
+    """Navigate to profile and send a connection request with a personalized note."""
     try:
-        # Make sure we're on their profile
-        if page.url.rstrip("/") != person["profile_url"].rstrip("/"):
-            page.goto(person["profile_url"], wait_until="domcontentloaded")
-            page_delay(config)
-
         message = person.get("message", "")
         if not message:
             print(f"    [connect] No message for {person['name']}, skipping")
             return False
 
-        print(f"\n    [connect] Sending invitation to {person['name']} at {person['company']}")
+        # ALWAYS navigate to the profile page first to avoid clicking wrong buttons
+        print(f"\n    [connect] Navigating to {person['name']}'s profile...")
+        page.goto(person["profile_url"], wait_until="domcontentloaded")
+        time.sleep(3)
+
+        print(f"    [connect] Sending invitation to {person['name']} at {person['company']}")
         print(f"    [connect] Role: {person.get('matched_role', 'unknown')}")
         print(f"    [connect] Message: {message}")
 
-        # Try clicking the main "Connect" button
-        connect_clicked = False
-        connect_btn = page.query_selector('button:has-text("Connect")')
-        if connect_btn:
-            connect_btn.click()
-            connect_clicked = True
-        else:
-            # Try the "More" dropdown
-            more_btn = page.query_selector('button[aria-label="More actions"]')
-            if more_btn:
+        # Use JS to find the correct Connect button on the profile page
+        # LinkedIn profile pages have the main action buttons in a specific section
+        connect_clicked = page.evaluate("""
+            () => {
+                // Look for Connect button in the main profile actions area
+                // These are the top-level action buttons on the profile
+                const buttons = document.querySelectorAll('button');
+                for (const btn of buttons) {
+                    const text = btn.innerText.trim();
+                    const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
+                    // Match exact "Connect" text or aria-label containing "connect"
+                    // but NOT "Message" or "Follow" buttons
+                    if ((text === 'Connect' || ariaLabel.includes('invite') || ariaLabel.includes('connect'))
+                        && !ariaLabel.includes('message')
+                        && btn.offsetParent !== null) {  // visible check
+                        btn.click();
+                        return 'main';
+                    }
+                }
+                return null;
+            }
+        """)
+
+        if not connect_clicked:
+            # Try the "More" dropdown on the profile
+            print(f"    [connect] No main Connect button, trying More dropdown...")
+            more_btn = page.query_selector('button[aria-label="More actions"], button:has-text("More")')
+            if more_btn and more_btn.is_visible():
                 more_btn.click()
-                time.sleep(1)
-                connect_option = page.query_selector('div[role="listbox"] span:has-text("Connect"), div.artdeco-dropdown__content span:has-text("Connect")')
-                if connect_option:
-                    connect_option.click()
-                    connect_clicked = True
-                else:
+                time.sleep(1.5)
+                # Look for Connect in dropdown
+                connect_clicked = page.evaluate("""
+                    () => {
+                        const items = document.querySelectorAll('[role="listbox"] li, .artdeco-dropdown__content li, .artdeco-dropdown__content-inner li');
+                        for (const item of items) {
+                            if (item.innerText.trim().toLowerCase().includes('connect')) {
+                                item.click();
+                                return 'dropdown';
+                            }
+                        }
+                        return null;
+                    }
+                """)
+                if not connect_clicked:
                     page.keyboard.press("Escape")
 
         if not connect_clicked:
-            print(f"    [connect] No Connect button for {person['name']}")
+            print(f"    [connect] No Connect button found for {person['name']}")
             person["connect_sent"] = False
             return False
 
-        time.sleep(2)
+        print(f"    [connect] Clicked Connect ({connect_clicked}), waiting for modal...")
+        time.sleep(3)
 
         # Look for "Add a note" button in the modal
-        add_note_btn = page.query_selector('button:has-text("Add a note")')
-        if add_note_btn:
-            add_note_btn.click()
-            time.sleep(1)
+        add_note_btn = page.evaluate("""
+            () => {
+                const buttons = document.querySelectorAll('button');
+                for (const btn of buttons) {
+                    if (btn.innerText.trim().toLowerCase().includes('add a note') && btn.offsetParent !== null) {
+                        btn.click();
+                        return true;
+                    }
+                }
+                return false;
+            }
+        """)
 
-            # Type the message in the note textarea
-            note_field = page.query_selector('textarea[name="message"], textarea#custom-message')
+        if add_note_btn:
+            time.sleep(1.5)
+            # Find the textarea in the modal and type the message
+            note_field = page.query_selector('textarea[name="message"], textarea#custom-message, textarea.connect-button-send-invite__custom-message')
             if not note_field:
-                # Try a broader selector
+                note_field = page.query_selector('div[role="dialog"] textarea, .artdeco-modal textarea')
+            if not note_field:
                 note_field = page.query_selector('textarea')
 
             if note_field:
                 note_field.fill(message)
                 time.sleep(1)
 
-                # Click Send
-                send_btn = page.query_selector('button:has-text("Send")')
-                if send_btn:
-                    send_btn.click()
+                # Click Send in the modal
+                sent = page.evaluate("""
+                    () => {
+                        const buttons = document.querySelectorAll('button');
+                        for (const btn of buttons) {
+                            const text = btn.innerText.trim().toLowerCase();
+                            if ((text === 'send' || text === 'send invitation') && btn.offsetParent !== null) {
+                                btn.click();
+                                return true;
+                            }
+                        }
+                        return false;
+                    }
+                """)
+
+                if sent:
                     time.sleep(2)
                     print(f"    [connect] SENT to {person['name']} at {person['company']}")
                     person["connect_sent"] = True
                     return True
+                else:
+                    print(f"    [connect] Could not find Send button for {person['name']}")
+                    page.keyboard.press("Escape")
             else:
                 print(f"    [connect] Could not find note field for {person['name']}")
                 page.keyboard.press("Escape")
         else:
-            # No "Add a note" option — might be a direct send modal
-            # Try to find and click Send directly, or dismiss
-            send_btn = page.query_selector('button:has-text("Send")')
-            if send_btn:
-                # Dismiss and skip — we want to send with a note
-                page.keyboard.press("Escape")
-                print(f"    [connect] No 'Add a note' option for {person['name']}, skipped")
+            # No "Add a note" — dismiss the modal, we only send with notes
+            page.keyboard.press("Escape")
+            print(f"    [connect] No 'Add a note' option for {person['name']}, skipped")
 
         person["connect_sent"] = False
         return False
 
     except Exception as e:
         print(f"    [connect] Error sending to {person['name']}: {e}")
+        # Try to dismiss any open modals
+        try:
+            page.keyboard.press("Escape")
+        except Exception:
+            pass
         person["connect_sent"] = False
         return False
 
@@ -905,7 +963,10 @@ def do_search(playwright, config, auto_connect=False, local_mode=False):
             save_prospects(all_prospects, config)
             save_seen_profiles(seen_profiles)
     finally:
-        browser.close()
+        try:
+            browser.close()
+        except Exception:
+            pass
 
 
 def main():
