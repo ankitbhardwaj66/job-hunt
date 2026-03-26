@@ -458,7 +458,7 @@ def find_people_at_company(page, company, config, seen_profiles, local_mode=Fals
         "vp of engineering", "vp of technology",
         "director of engineering", "director of technology",
         # Priority 2: Other C-level / VP
-        "coo", "chief operating", "cmo", "cpo",
+        "chief operating officer", "cmo", "cpo",
         "chief product", "chief marketing",
         "vp of", "vp ", "vice president",
         "managing director",
@@ -486,9 +486,14 @@ def find_people_at_company(page, company, config, seen_profiles, local_mode=Fals
         "e-learning", "sme", "academician", "instructor",
         "consultant", "analyst", "coordinator", "associate",
         "practitioner", "specialist",
+        # Mid-level managers that aren't decision makers for hiring
+        "operations manager", "project manager", "project coordinator",
+        "program manager", "delivery manager", "team leader",
+        "scrum master", "agile coach",
         # Job seekers — they're looking for work, not hiring
         "available for", "looking for", "seeking", "open to work",
         "actively looking", "job search", "hire me",
+        "#opentowork", "open_to_work",
     ]
 
     print(f"\n  Looking for decision-makers at {company['name']}...")
@@ -614,6 +619,27 @@ def check_profile_activity(page, person, config, local_mode=False):
         degree_badge = page.query_selector('span.dist-value')
         if degree_badge:
             person["connection_degree"] = degree_badge.inner_text().strip()
+
+        # Check for "Open to work" badge — skip job seekers
+        is_job_seeker = page.evaluate("""
+            () => {
+                const text = document.body.innerText.toLowerCase();
+                // Check for open to work badge/banner
+                if (text.includes('#opentowork') || text.includes('open to work')) {
+                    // But make sure it's the profile badge, not in a post
+                    const badge = document.querySelector('[class*="open-to-work"], [class*="opentowork"], .pv-top-card--open-to-work');
+                    if (badge) return true;
+                    // Also check the photo overlay
+                    const photoFrame = document.querySelector('img[alt*="Open to work"], div[class*="open-to"]');
+                    if (photoFrame) return true;
+                }
+                return false;
+            }
+        """)
+        if is_job_seeker:
+            print(f"    [skip] {person['name']} — has 'Open to work' badge, job seeker")
+            person["has_recent_activity"] = False
+            return person
 
         # Visit "All activity" page — shows posts, comments, and reactions
         profile_slug = person["profile_url"].rstrip("/").split("/")[-1]
