@@ -23,6 +23,7 @@
   ],
   "max_companies_per_run": 15,
   "max_people_per_company": 5,
+  "max_connects_per_company": 2,
   "delay_between_actions": {
     "min_seconds": 3,
     "max_seconds": 8

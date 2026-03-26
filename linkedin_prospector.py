@@ -1229,14 +1229,18 @@ def do_search(playwright, config, auto_connect=False, local_mode=False):
                 print(f"    No decision-makers found, marking company as visited")
             else:
                 # Step 3: Check profile activity
+                max_connects = config.get("max_connects_per_company", 2)
+                connects_sent = 0
                 for person in people:
                     if person["likely_active"]:
                         person = check_profile_activity(page, person, config, local_mode=local_mode)
                         # Regenerate message now that we have their actual location
                         person["message"] = generate_message(person, local_mode=local_mode, location=location)
-                        # Step 4: Only send connect to active decision makers
-                        if auto_connect and person.get("has_recent_activity"):
-                            send_connection_request(page, person, config)
+                        # Step 4: Only send connect to active decision makers (up to max per company)
+                        if auto_connect and person.get("has_recent_activity") and connects_sent < max_connects:
+                            success = send_connection_request(page, person, config)
+                            if success:
+                                connects_sent += 1
                         page_delay(config)
 
             all_prospects.extend(people)
