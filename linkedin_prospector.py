@@ -357,6 +357,7 @@ def find_people_at_company(page, company, config, seen_profiles):
                 "likely_active": len(headline) > 10,
                 "found_date": datetime.now().strftime("%Y-%m-%d"),
             }
+            person["message"] = generate_message(person)
             people.append(person)
             seen_profiles.add(profile_url)
             print(f"    + {name} — {headline}")
@@ -380,10 +381,7 @@ def check_profile_activity(page, person, config):
 
         # Check for recent activity section
         activity_section = page.query_selector('section.artdeco-card a[href*="/recent-activity/"]')
-        if activity_section:
-            person["has_recent_activity"] = True
-        else:
-            person["has_recent_activity"] = False
+        person["has_recent_activity"] = bool(activity_section)
 
         # Try to get connection degree
         degree_badge = page.query_selector('span.dist-value')
@@ -396,25 +394,119 @@ def check_profile_activity(page, person, config):
     return person
 
 
+FIELDNAMES = [
+    "name", "profile_url", "company", "company_url",
+    "matched_role", "likely_active", "has_recent_activity",
+    "connection_degree", "found_date", "message",
+]
+
+_MESSAGE_TEMPLATES = [
+    "Hey {first_name}! Stumbled on {company} and thought it looked really cool. I'm a dev who works with small teams — backend, cloud, DevOps stuff. Would be great to connect!",
+    "Hey {first_name}, came across {company} and liked what you guys are up to. I do backend and cloud work with small teams. Let's connect!",
+    "Hey {first_name}! Been checking out {company} — cool stuff. I'm into backend dev, AWS, Kubernetes, that kinda thing. Would love to connect!",
+    "Hey {first_name}, saw {company} and had to reach out. I work with small teams on backend and infra — always cool to meet folks building interesting things. Let's connect!",
+    "Hey {first_name}! {company} looks awesome. I'm a dev who does backend, cloud, and DevOps with small teams. Would love to be in your network!",
+]
+
+
+def generate_message(person):
+    """Generate a personalized connection request message under 300 chars."""
+    first_name = person["name"].split()[0] if person["name"] else "there"
+    company = person["company"]
+    # Shorten company name if too long
+    if len(company) > 40:
+        company = company[:37] + "..."
+
+    template = random.choice(_MESSAGE_TEMPLATES)
+    msg = template.format(first_name=first_name, company=company)
+
+    # Ensure under 300 chars
+    if len(msg) > 300:
+        msg = msg[:297] + "..."
+    return msg
+
+
 def save_prospects(prospects, config):
-    """Save prospects to CSV file."""
+    """Save prospects to CSV and optionally sync to Google Sheets."""
     output_file = SCRIPT_DIR / config["output_file"]
     file_exists = output_file.exists()
 
-    fieldnames = [
-        "name", "headline", "profile_url", "company", "company_url",
-        "matched_role", "likely_active", "has_recent_activity",
-        "connection_degree", "found_date",
-    ]
-
     with open(output_file, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+        writer = csv.DictWriter(f, fieldnames=FIELDNAMES, extrasaction="ignore")
         if not file_exists:
             writer.writeheader()
         for person in prospects:
             writer.writerow(person)
 
     print(f"\nSaved {len(prospects)} prospects to {output_file}")
+
+    # Sync to Google Sheets if configured
+    gs_config = config.get("google_sheets", {})
+    if gs_config.get("enabled") and gs_config.get("sheet_url"):
+        sync_to_google_sheets(config)
+
+
+def sync_to_google_sheets(config):
+    """Read full CSV and sync it to Google Sheets (append new rows, skip duplicates)."""
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+    except ImportError:
+        print("  [sheets] gspread not installed. Run: pip install gspread google-auth")
+        return
+
+    gs_config = config["google_sheets"]
+    # Resolve relative path from script directory
+    key_path = gs_config["service_account_key"]
+    if not os.path.isabs(key_path):
+        key_path = str(SCRIPT_DIR / key_path)
+    key_path = os.path.expanduser(key_path)
+
+    if not os.path.exists(key_path):
+        print(f"  [sheets] Service account key not found at {key_path}")
+        return
+
+    try:
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive.readonly",
+        ]
+        creds = Credentials.from_service_account_file(key_path, scopes=scopes)
+        gc = gspread.authorize(creds)
+        sheet = gc.open_by_url(gs_config["sheet_url"]).sheet1
+
+        # Get existing profile URLs from sheet to avoid duplicates
+        existing_data = sheet.get_all_values()
+        if existing_data:
+            header = existing_data[0]
+            if "profile_url" in header:
+                url_col = header.index("profile_url")
+                existing_urls = {row[url_col] for row in existing_data[1:] if len(row) > url_col}
+            else:
+                existing_urls = set()
+                sheet.update("A1", [FIELDNAMES])
+        else:
+            existing_urls = set()
+            sheet.update("A1", [FIELDNAMES])
+
+        # Read all prospects from CSV
+        output_file = SCRIPT_DIR / config["output_file"]
+        new_rows = []
+        with open(output_file, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if row.get("profile_url") not in existing_urls:
+                    new_rows.append([row.get(field, "") for field in FIELDNAMES])
+
+        if new_rows:
+            next_row = len(existing_data) + 1 if existing_data else 2
+            sheet.update(f"A{next_row}", new_rows)
+            print(f"  [sheets] Added {len(new_rows)} new rows to Google Sheet")
+        else:
+            print(f"  [sheets] No new rows to add (all already in sheet)")
+
+    except Exception as e:
+        print(f"  [sheets] Error syncing to Google Sheets: {e}")
 
 
 def do_search(playwright, config):
@@ -462,9 +554,8 @@ def do_search(playwright, config):
         for company in companies:
             people = find_people_at_company(page, company, config, seen_profiles)
 
-            # Step 3: Optionally check profile activity (slower, more risky)
+            # Step 3: Check profile activity and connectability
             for person in people:
-                # Only check top prospects to limit page visits
                 if person["likely_active"]:
                     person = check_profile_activity(page, person, config)
                     page_delay(config)

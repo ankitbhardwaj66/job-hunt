@@ -10,6 +10,9 @@ prospects.csv
 # Debug snapshots
 debug/
 
+# Google service account credentials (DO NOT commit)
+service_account.json
+
 # Python
 __pycache__/
 *.pyc

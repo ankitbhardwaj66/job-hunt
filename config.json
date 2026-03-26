@@ -31,5 +31,10 @@
     "min_seconds": 5,
     "max_seconds": 12
   },
-  "output_file": "prospects.csv"
+  "output_file": "prospects.csv",
+  "google_sheets": {
+    "enabled": true,
+    "sheet_url": "https://docs.google.com/spreadsheets/d/14uom8bxvdka1blVaYsf67nmb1uIhwruHtw9_l36XrlM/edit",
+    "service_account_key": "service_account.json"
+  }
 }
