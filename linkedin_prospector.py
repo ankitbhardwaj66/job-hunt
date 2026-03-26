@@ -202,18 +202,20 @@ def _load_existing_from_sheet(config):
         if not data:
             return slugs, profile_urls
 
-        header = data[0]
-        company_col = header.index("company_url") if "company_url" in header else -1
-        profile_col = header.index("profile_url") if "profile_url" in header else -1
-
+        # Scan ALL cells for company slugs and profile URLs
+        # This handles misaligned headers from schema changes
         for row in data[1:]:
-            if company_col >= 0 and len(row) > company_col:
-                match = re.search(r'/company/([^/?]+)', row[company_col])
-                if match:
-                    slugs.add(match.group(1))
-            if profile_col >= 0 and len(row) > profile_col:
-                if row[profile_col]:
-                    profile_urls.add(row[profile_col])
+            for cell in row:
+                cell = cell.strip()
+                if not cell:
+                    continue
+                # Extract company slugs from any cell containing /company/
+                company_match = re.search(r'/company/([^/?]+)', cell)
+                if company_match:
+                    slugs.add(company_match.group(1))
+                # Extract profile URLs from any cell containing /in/
+                if '/in/' in cell and 'linkedin.com' in cell:
+                    profile_urls.add(cell.split("?")[0])
 
         print(f"Loaded from Google Sheet: {len(slugs)} companies, {len(profile_urls)} profiles")
     except Exception as e:
