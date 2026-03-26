@@ -508,7 +508,7 @@ def find_people_at_company(page, company, config, seen_profiles, local_mode=Fals
 
 
 def check_profile_activity(page, person, config):
-    """Visit profile and activity page to check if they posted 2+ times in last 30 days."""
+    """Visit profile activity page — check for any 2+ activities (posts, comments, reactions) in last 30 days."""
     try:
         # Visit profile first for connection degree
         page.goto(person["profile_url"], wait_until="domcontentloaded")
@@ -519,7 +519,7 @@ def check_profile_activity(page, person, config):
         if degree_badge:
             person["connection_degree"] = degree_badge.inner_text().strip()
 
-        # Now visit their activity page to count recent posts
+        # Visit "All activity" page — shows posts, comments, and reactions
         profile_slug = person["profile_url"].rstrip("/").split("/")[-1]
         activity_url = f"https://www.linkedin.com/in/{profile_slug}/recent-activity/all/"
         page.goto(activity_url, wait_until="domcontentloaded")
@@ -527,38 +527,53 @@ def check_profile_activity(page, person, config):
         random_scroll(page)
         time.sleep(2)
 
-        # Extract post dates from the activity feed
-        # LinkedIn shows relative times like "1d", "3d", "1w", "2w", "1mo"
-        recent_post_count = page.evaluate("""
+        # Count any activity in last 30 days — posts, comments, reactions, shares
+        recent_activity_count = page.evaluate("""
             () => {
-                const now = Date.now();
-                const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
-                const cutoff = now - thirtyDaysMs;
                 let count = 0;
 
-                // Look for time elements in activity feed
-                const timeEls = document.querySelectorAll('time, span.feed-shared-actor__sub-description span[aria-hidden="true"], span.update-components-actor__sub-description span[aria-hidden="true"]');
-                for (const el of timeEls) {
-                    const text = el.innerText.trim().toLowerCase();
-                    // Parse relative time strings
-                    let daysAgo = null;
-                    if (text.includes('just now') || text.includes('moment')) daysAgo = 0;
-                    else if (text.match(/(\d+)\s*m\b/) && !text.includes('mo')) daysAgo = 0;  // minutes
-                    else if (text.match(/(\d+)\s*h/)) daysAgo = 0;  // hours
-                    else if (text.match(/(\d+)\s*d/)) daysAgo = parseInt(text.match(/(\d+)\s*d/)[1]);
-                    else if (text.match(/(\d+)\s*w/)) daysAgo = parseInt(text.match(/(\d+)\s*w/)[1]) * 7;
-                    else if (text.match(/(\d+)\s*mo/)) daysAgo = parseInt(text.match(/(\d+)\s*mo/)[1]) * 30;
-                    else if (text.match(/(\d+)\s*yr/)) daysAgo = parseInt(text.match(/(\d+)\s*yr/)[1]) * 365;
+                // Helper: parse relative time text to days ago
+                function parseDaysAgo(text) {
+                    text = text.toLowerCase().trim();
+                    if (text.includes('just now') || text.includes('moment')) return 0;
+                    let m;
+                    if ((m = text.match(/(\\d+)\\s*m\\b/)) && !text.includes('mo')) return 0;
+                    if ((m = text.match(/(\\d+)\\s*h/))) return 0;
+                    if ((m = text.match(/(\\d+)\\s*d/))) return parseInt(m[1]);
+                    if ((m = text.match(/(\\d+)\\s*w/))) return parseInt(m[1]) * 7;
+                    if ((m = text.match(/(\\d+)\\s*mo/))) return parseInt(m[1]) * 30;
+                    if ((m = text.match(/(\\d+)\\s*yr/))) return parseInt(m[1]) * 365;
+                    return null;
+                }
 
+                // Strategy 1: All activity feed items (posts, shares, comments, reactions)
+                // Each feed item has a timestamp somewhere
+                const allText = document.querySelectorAll(
+                    'time, ' +
+                    'span[aria-hidden="true"], ' +
+                    '.feed-shared-actor__sub-description, ' +
+                    '.update-components-actor__sub-description'
+                );
+                const seen = new Set();
+                for (const el of allText) {
+                    const text = el.innerText.trim();
+                    if (seen.has(text) || text.length > 50) continue;
+                    seen.add(text);
+
+                    const daysAgo = parseDaysAgo(text);
                     if (daysAgo !== null && daysAgo <= 30) {
                         count++;
                     }
                 }
 
-                // Also try datetime attributes on <time> elements
+                // Strategy 2: <time> elements with datetime attributes
+                const cutoff = Date.now() - (30 * 24 * 60 * 60 * 1000);
                 const timeTags = document.querySelectorAll('time[datetime]');
                 for (const t of timeTags) {
-                    const dt = new Date(t.getAttribute('datetime'));
+                    const key = t.getAttribute('datetime');
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    const dt = new Date(key);
                     if (dt.getTime() > cutoff) {
                         count++;
                     }
@@ -568,17 +583,17 @@ def check_profile_activity(page, person, config):
             }
         """)
 
-        person["recent_posts_30d"] = recent_post_count
-        person["has_recent_activity"] = recent_post_count >= 2
+        person["recent_activity_30d"] = recent_activity_count
+        person["has_recent_activity"] = recent_activity_count >= 2
         if person["has_recent_activity"]:
-            print(f"    [active] {person['name']} — {recent_post_count} posts in last 30 days")
+            print(f"    [active] {person['name']} — {recent_activity_count} activities in last 30 days")
         else:
-            print(f"    [inactive] {person['name']} — only {recent_post_count} posts in last 30 days, skipping connect")
+            print(f"    [inactive] {person['name']} — only {recent_activity_count} activities in last 30 days, skipping connect")
 
     except Exception as e:
         print(f"    [activity] Error checking {person['name']}: {e}")
         person["has_recent_activity"] = None
-        person["recent_posts_30d"] = 0
+        person["recent_activity_30d"] = 0
 
     return person
 
@@ -673,7 +688,7 @@ def send_connection_request(page, person, config):
 
 FIELDNAMES = [
     "name", "profile_url", "company", "company_url",
-    "matched_role", "has_recent_activity", "recent_posts_30d",
+    "matched_role", "has_recent_activity", "recent_activity_30d",
     "connection_degree", "found_date", "message", "connect_sent", "local",
 ]
 
