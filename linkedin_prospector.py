@@ -316,9 +316,20 @@ def find_people_at_company(page, company, config, seen_profiles):
     people = []
     target_roles = [r.lower() for r in config["target_roles"]]
     max_people = config["max_people_per_company"]
-    role_patterns = ["founder", "co-founder", "ceo", "cto", "coo", "chief",
-                     "head of", "vp ", "vice president", "director", "lead",
-                     "engineering manager", "tech lead"]
+    role_patterns = ["founder", "co-founder", "ceo", "cto", "coo", "cmo", "cpo",
+                     "chief executive", "chief technology", "chief operating",
+                     "chief product", "chief marketing",
+                     "head of engineering", "head of product", "head of technology",
+                     "vp of", "vp ", "vice president",
+                     "director of engineering", "director of technology",
+                     "engineering manager", "tech lead", "technical lead",
+                     "managing director"]
+    # Words that disqualify a person even if a role keyword matched
+    exclude_patterns = ["trainer", "trainee", "intern", "student", "faculty",
+                        "content", "designer", "graphic", "recruiter", "hr ",
+                        "human resource", "marketing executive", "sales executive",
+                        "freelancer", "volunteer", "teaching", "teacher",
+                        "e-learning", "sme", "academician"]
 
     print(f"\n  Looking for decision-makers at {company['name']}...")
 
@@ -373,6 +384,9 @@ def find_people_at_company(page, company, config, seen_profiles):
             headline = ""
             for line in lines[1:6]:
                 line_lower = line.lower()
+                # Check exclusions first — skip this line if it has disqualifying words
+                if any(ex in line_lower for ex in exclude_patterns):
+                    continue
                 for role in target_roles + role_patterns:
                     if role in line_lower:
                         headline = line
@@ -382,11 +396,13 @@ def find_people_at_company(page, company, config, seen_profiles):
 
             # If no headline found from lines, check all text
             if not headline:
+                # Check exclusions on full text
+                if any(ex in text for ex in exclude_patterns):
+                    continue
                 matched = False
                 for role in target_roles + role_patterns:
                     if role in text:
                         matched = True
-                        # Try to find the line containing the role
                         for line in lines[1:]:
                             if role in line.lower():
                                 headline = line
@@ -398,6 +414,10 @@ def find_people_at_company(page, company, config, seen_profiles):
                     continue
 
             headline_lower = headline.lower()
+            # Final exclusion check on matched headline
+            if any(ex in headline_lower for ex in exclude_patterns):
+                continue
+
             matched_role = None
             for role in target_roles + role_patterns:
                 if role in headline_lower:
