@@ -5,7 +5,7 @@
 **Current:** CKAD & AWS Certified | SRE / DevOps Engineer | Kubernetes, Python, Bash, AWS Cloud, Cost Optimization, Cloud Migrations
 
 **Change headline to:**
-> SRE / DevOps Engineer | Kubernetes, AWS, Cloud Migrations | Available for Contract Work | ankitbhardwaj.in
+> Software Engineer | SRE / DevOps | Kubernetes, AWS, Cloud Migrations | Available for Contract Work | ankitbhardwaj.in
 
 **Other changes:**
 - Turn OFF the green "Open to work" photo frame (keep the setting enabled — recruiters still see it, but you don't look desperate)
@@ -18,17 +18,18 @@
 
 **About section — replace with this:**
 
-> 10+ years building and running cloud infrastructure. I help teams ship faster, stay up, and spend less on AWS.
+> 10+ years as a software engineer — building scalable backend systems, running cloud infrastructure, and helping teams ship faster while spending less.
 >
 > What I do:
+> - Backend development — Python, microservices, APIs
 > - Kubernetes setups, migrations, and management (CKAD certified)
 > - AWS infrastructure & cost optimization (AWS Solutions Architect certified)
 > - CI/CD pipelines with Terraform, Kubernetes, and Codefresh
-> - Microservices in Python, containerization, cloud-native architecture
+> - Cloud-native architecture, containerization, system design
 >
 > Industries: healthcare, finance, telecom
 >
-> Currently open to contract/consulting work — if your team needs DevOps or SRE help without the overhead of a full-time hire, let's talk.
+> Currently open to contract/consulting work — whether you need a software engineer, DevOps help, or SRE support without the overhead of a full-time hire, let's talk.
 >
 > ankitbhardwaj.in
 - Start posting 2-3x per week to boost visibility:
@@ -52,7 +53,7 @@
 
 **Two-step approach (connect first, message later):**
 1. Send a connection request with a short note (300 char limit):
-   > Hey [Name], saw what you're building at [Company] — really cool stuff. I work in DevOps/Cloud (Kubernetes, AWS) and love following what small teams are doing. Would love to connect!
+   > Hey [Name], saw what you're building at [Company] — really cool stuff. I'm a software engineer (backend, DevOps, AWS) and love following what small teams are doing. Would love to connect!
 2. Wait 1-2 days after they accept
 3. Then send one of the full message templates below
 4. If no reply, follow up after 5-7 days
@@ -69,7 +70,7 @@
 >
 > Stumbled on [Company Name] and really liked what you guys are doing with [specific area] — had to reach out.
 >
-> So I'm a DevOps/SRE guy who does contract work with small teams — Kubernetes, AWS, CI/CD pipelines, cloud migrations, cost optimization. I know smaller teams don't always need a full-time hire but could use an extra hand now and then.
+> So I'm a software engineer who does contract work with small teams — backend development, Kubernetes, AWS, CI/CD, cloud migrations. I know smaller teams don't always need a full-time hire but could use an extra hand now and then.
 >
 > You can check out some of my work here: ankitbhardwaj.in
 >
@@ -84,7 +85,7 @@
 >
 > Been following [Company Name] for a bit — really cool what you're building!
 >
-> Quick intro — I'm a DevOps/SRE engineer who works with small teams on a contract basis. Need someone to set up your cloud infra, sort out your Kubernetes setup, build CI/CD pipelines, or cut your AWS bill? That's kinda my thing.
+> Quick intro — I'm a software engineer who works with small teams on a contract basis. Need someone to build backend features, set up your cloud infra, sort out your Kubernetes setup, or build CI/CD pipelines? That's kinda my thing.
 >
 > Here's my site if you wanna see what I've been up to: ankitbhardwaj.in
 >
@@ -99,7 +100,7 @@
 >
 > Saw [Company Name] is growing — that's awesome! I know scaling tech with a small team can get hectic real fast.
 >
-> I do contract DevOps/SRE work with companies like yours — setting up cloud infra, Kubernetes, CI/CD pipelines, cutting AWS costs, and just keeping things running smooth so your devs can ship faster. No long onboarding, no overhead.
+> I do contract engineering work with companies like yours — backend development, cloud infra, Kubernetes, CI/CD pipelines, cutting AWS costs. Basically anything from writing code to keeping things running smooth. No long onboarding, no overhead.
 >
 > A few things I've helped teams with recently:
 > - Set up Kubernetes clusters and automated deployments from scratch
