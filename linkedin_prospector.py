@@ -182,7 +182,7 @@ def search_companies(page, config):
 
         print(f"\nSearching for: {keyword}")
 
-        for size_code in ["B", "C"]:
+        for size_code in ["C"]:  # C = 11-50 employees
             if len(companies) >= max_companies:
                 break
 
@@ -394,10 +394,94 @@ def check_profile_activity(page, person, config):
     return person
 
 
+def send_connection_request(page, person, config):
+    """Send a connection request with a personalized note from the profile page."""
+    try:
+        # Make sure we're on their profile
+        if page.url.rstrip("/") != person["profile_url"].rstrip("/"):
+            page.goto(person["profile_url"], wait_until="domcontentloaded")
+            page_delay(config)
+
+        message = person.get("message", "")
+        if not message:
+            print(f"    [connect] No message for {person['name']}, skipping")
+            return False
+
+        # Try clicking the main "Connect" button
+        connect_clicked = False
+        connect_btn = page.query_selector('button:has-text("Connect")')
+        if connect_btn:
+            connect_btn.click()
+            connect_clicked = True
+        else:
+            # Try the "More" dropdown
+            more_btn = page.query_selector('button[aria-label="More actions"]')
+            if more_btn:
+                more_btn.click()
+                time.sleep(1)
+                connect_option = page.query_selector('div[role="listbox"] span:has-text("Connect"), div.artdeco-dropdown__content span:has-text("Connect")')
+                if connect_option:
+                    connect_option.click()
+                    connect_clicked = True
+                else:
+                    page.keyboard.press("Escape")
+
+        if not connect_clicked:
+            print(f"    [connect] No Connect button for {person['name']}")
+            person["connect_sent"] = False
+            return False
+
+        time.sleep(2)
+
+        # Look for "Add a note" button in the modal
+        add_note_btn = page.query_selector('button:has-text("Add a note")')
+        if add_note_btn:
+            add_note_btn.click()
+            time.sleep(1)
+
+            # Type the message in the note textarea
+            note_field = page.query_selector('textarea[name="message"], textarea#custom-message')
+            if not note_field:
+                # Try a broader selector
+                note_field = page.query_selector('textarea')
+
+            if note_field:
+                note_field.fill(message)
+                time.sleep(1)
+
+                # Click Send
+                send_btn = page.query_selector('button:has-text("Send")')
+                if send_btn:
+                    send_btn.click()
+                    time.sleep(2)
+                    print(f"    [connect] Sent request to {person['name']}")
+                    person["connect_sent"] = True
+                    return True
+            else:
+                print(f"    [connect] Could not find note field for {person['name']}")
+                page.keyboard.press("Escape")
+        else:
+            # No "Add a note" option — might be a direct send modal
+            # Try to find and click Send directly, or dismiss
+            send_btn = page.query_selector('button:has-text("Send")')
+            if send_btn:
+                # Dismiss and skip — we want to send with a note
+                page.keyboard.press("Escape")
+                print(f"    [connect] No 'Add a note' option for {person['name']}, skipped")
+
+        person["connect_sent"] = False
+        return False
+
+    except Exception as e:
+        print(f"    [connect] Error sending to {person['name']}: {e}")
+        person["connect_sent"] = False
+        return False
+
+
 FIELDNAMES = [
     "name", "profile_url", "company", "company_url",
     "matched_role", "likely_active", "has_recent_activity",
-    "connection_degree", "found_date", "message",
+    "connection_degree", "found_date", "message", "connect_sent",
 ]
 
 _MESSAGE_TEMPLATES = [
@@ -509,7 +593,7 @@ def sync_to_google_sheets(config):
         print(f"  [sheets] Error syncing to Google Sheets: {e}")
 
 
-def do_search(playwright, config):
+def do_search(playwright, config, auto_connect=False):
     """Run the full search pipeline."""
     session_file = SESSION_DIR / "state.json"
     if not session_file.exists():
@@ -554,10 +638,13 @@ def do_search(playwright, config):
         for company in companies:
             people = find_people_at_company(page, company, config, seen_profiles)
 
-            # Step 3: Check profile activity and connectability
+            # Step 3: Check profile activity
             for person in people:
                 if person["likely_active"]:
                     person = check_profile_activity(page, person, config)
+                    # Step 4: Send connection request if --connect flag is set
+                    if auto_connect:
+                        send_connection_request(page, person, config)
                     page_delay(config)
 
             all_prospects.extend(people)
@@ -590,10 +677,15 @@ def main():
     parser = argparse.ArgumentParser(description="LinkedIn Prospector - Find contract job opportunities")
     parser.add_argument("--login", action="store_true", help="Open browser for manual LinkedIn login")
     parser.add_argument("--search", action="store_true", help="Run the company/people search (default if no flags)")
+    parser.add_argument("--connect", action="store_true", help="Auto-send connection requests with personalized notes")
     args = parser.parse_args()
 
     # Default to search if no flags given
-    if not args.login and not args.search:
+    if not args.login and not args.search and not args.connect:
+        args.search = True
+
+    # --connect implies --search
+    if args.connect:
         args.search = True
 
     config = load_config()
@@ -603,7 +695,7 @@ def main():
         if args.login:
             do_login(p)
         if args.search:
-            do_search(p, config)
+            do_search(p, config, auto_connect=args.connect)
 
 
 if __name__ == "__main__":
