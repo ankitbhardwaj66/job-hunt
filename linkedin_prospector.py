@@ -1034,11 +1034,21 @@ def save_prospects(prospects, config):
         new_rows = []
         for person in prospects:
             if person.get("profile_url") not in existing_urls:
-                new_rows.append([str(person.get(field, "")) for field in FIELDNAMES])
+                row = []
+                for field in FIELDNAMES:
+                    val = str(person.get(field, ""))
+                    # Make name a hyperlink to profile
+                    if field == "name" and person.get("profile_url"):
+                        val = f'=HYPERLINK("{person["profile_url"]}","{val.replace(chr(34), chr(39))}")'
+                    # Make company a hyperlink to company page
+                    elif field == "company" and person.get("company_url"):
+                        val = f'=HYPERLINK("{person["company_url"]}","{val.replace(chr(34), chr(39))}")'
+                    row.append(val)
+                new_rows.append(row)
 
         if new_rows:
             next_row = len(existing_data) + 1
-            sheet.update(values=new_rows, range_name=f"A{next_row}")
+            sheet.update(values=new_rows, range_name=f"A{next_row}", value_input_option="USER_ENTERED")
             print(f"\n  [sheets] Added {len(new_rows)} new prospects to Google Sheet")
         else:
             print(f"\n  [sheets] No new prospects to add (all already in sheet)")
