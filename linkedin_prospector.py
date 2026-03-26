@@ -198,24 +198,26 @@ def _load_existing_from_sheet(config):
     profile_urls = set()
     try:
         sheet = _get_sheets_client(config)
-        data = sheet.get_all_values()
-        if not data:
+
+        # Get formulas (not display values) since URLs are in HYPERLINK formulas
+        # get_all_values() returns display text, we need the actual formulas
+        formulas = sheet.get(value_render_option="FORMULA")
+        if not formulas:
             return slugs, profile_urls
 
-        # Scan ALL cells for company slugs and profile URLs
-        # This handles misaligned headers from schema changes
-        for row in data[1:]:
+        for row in formulas[1:]:
             for cell in row:
-                cell = cell.strip()
+                cell = str(cell).strip()
                 if not cell:
                     continue
-                # Extract company slugs from any cell containing /company/
-                company_match = re.search(r'/company/([^/?]+)', cell)
+                # Extract company slugs from HYPERLINK formulas or raw URLs
+                company_match = re.search(r'/company/([^/?\"]+)', cell)
                 if company_match:
                     slugs.add(company_match.group(1))
-                # Extract profile URLs from any cell containing /in/
-                if '/in/' in cell and 'linkedin.com' in cell:
-                    profile_urls.add(cell.split("?")[0])
+                # Extract profile URLs from HYPERLINK formulas or raw URLs
+                profile_match = re.search(r'(https?://[^"]*linkedin\.com/in/[^"/?]+)', cell)
+                if profile_match:
+                    profile_urls.add(profile_match.group(1))
 
         print(f"Loaded from Google Sheet: {len(slugs)} companies, {len(profile_urls)} profiles")
     except Exception as e:
@@ -1015,20 +1017,21 @@ def save_prospects(prospects, config):
 
     try:
         sheet = _get_sheets_client(config)
-        existing_data = sheet.get_all_values()
+        # Get formulas to extract URLs from HYPERLINK cells
+        existing_formulas = sheet.get(value_render_option="FORMULA")
 
         # Ensure header exists
-        if not existing_data:
+        if not existing_formulas:
             sheet.update(values=[FIELDNAMES], range_name="A1")
-            existing_data = [FIELDNAMES]
+            existing_formulas = [FIELDNAMES]
 
-        # Get existing profile URLs to avoid duplicates
-        header = existing_data[0]
-        if "profile_url" in header:
-            url_col = header.index("profile_url")
-            existing_urls = {row[url_col] for row in existing_data[1:] if len(row) > url_col}
-        else:
-            existing_urls = set()
+        # Extract existing profile URLs from HYPERLINK formulas
+        existing_urls = set()
+        for row in existing_formulas[1:]:
+            for cell in row:
+                match = re.search(r'(https?://[^"]*linkedin\.com/in/[^"/?]+)', str(cell))
+                if match:
+                    existing_urls.add(match.group(1))
 
         # Build new rows (skip duplicates)
         new_rows = []
@@ -1047,7 +1050,7 @@ def save_prospects(prospects, config):
                 new_rows.append(row)
 
         if new_rows:
-            next_row = len(existing_data) + 1
+            next_row = len(existing_formulas) + 1
             sheet.update(values=new_rows, range_name=f"A{next_row}", value_input_option="USER_ENTERED")
             print(f"\n  [sheets] Added {len(new_rows)} new prospects to Google Sheet")
         else:
