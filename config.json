@@ -32,6 +32,20 @@
     "max_seconds": 12
   },
   "output_file": "prospects.csv",
+  "local_mode": {
+    "location": "Chandigarh",
+    "search_keywords": [
+      "software company Chandigarh",
+      "IT company Chandigarh",
+      "tech startup Chandigarh",
+      "web development Chandigarh",
+      "app development Chandigarh",
+      "SaaS Chandigarh",
+      "IT services Chandigarh Mohali",
+      "software Mohali",
+      "tech Panchkula"
+    ]
+  },
   "google_sheets": {
     "enabled": true,
     "sheet_url": "https://docs.google.com/spreadsheets/d/14uom8bxvdka1blVaYsf67nmb1uIhwruHtw9_l36XrlM/edit",

@@ -359,7 +359,7 @@ def extract_people_from_page(page):
     return results
 
 
-def find_people_at_company(page, company, config, seen_profiles):
+def find_people_at_company(page, company, config, seen_profiles, local_mode=False, location=""):
     """Find decision-makers at a given company."""
     people = []
     target_roles = [r.lower() for r in config["target_roles"]]
@@ -482,7 +482,7 @@ def find_people_at_company(page, company, config, seen_profiles):
                 "likely_active": len(headline) > 10,
                 "found_date": datetime.now().strftime("%Y-%m-%d"),
             }
-            person["message"] = generate_message(person)
+            person["message"] = generate_message(person, local_mode=local_mode, location=location)
             people.append(person)
             seen_profiles.add(profile_url)
             print(f"    + {name} — {headline}")
@@ -675,8 +675,16 @@ _MESSAGE_TEMPLATES = [
     "Hey {first_name}! {company} looks awesome. I'm a dev who does backend, cloud, and DevOps with small teams. Would love to be in your network!",
 ]
 
+_LOCAL_MESSAGE_TEMPLATES = [
+    "Hey {first_name}! I'm based in {location} too and came across {company} — cool to see what you guys are building here. I'm a software engineer, work from home, and open for contract work. Would love to connect!",
+    "Hey {first_name}, nice to see {company} in {location}! I live here too and work remotely as a dev — backend, cloud, DevOps. Always looking to connect with local tech folks. Let's connect!",
+    "Hey {first_name}! Fellow {location} person here. Saw {company} and loved what you're doing. I'm a software engineer working from home, open to contract gigs. Would be great to connect locally!",
+    "Hey {first_name}, saw {company} is in {location} — same here! I'm a dev working from home, into backend and cloud stuff. Would love to connect and see if I can help out sometime!",
+    "Hey {first_name}! Cool to find {company} right here in {location}. I work remotely as a software engineer and I'm open for contract work. Let's connect — always great to know local tech people!",
+]
 
-def generate_message(person):
+
+def generate_message(person, local_mode=False, location=""):
     """Generate a personalized connection request message under 300 chars."""
     first_name = person["name"].split()[0] if person["name"] else "there"
     company = person["company"]
@@ -684,8 +692,12 @@ def generate_message(person):
     if len(company) > 40:
         company = company[:37] + "..."
 
-    template = random.choice(_MESSAGE_TEMPLATES)
-    msg = template.format(first_name=first_name, company=company)
+    if local_mode and location:
+        template = random.choice(_LOCAL_MESSAGE_TEMPLATES)
+        msg = template.format(first_name=first_name, company=company, location=location)
+    else:
+        template = random.choice(_MESSAGE_TEMPLATES)
+        msg = template.format(first_name=first_name, company=company)
 
     # Ensure under 300 chars
     if len(msg) > 300:
@@ -776,14 +788,24 @@ def sync_to_google_sheets(config):
         print(f"  [sheets] Error syncing to Google Sheets: {e}")
 
 
-def do_search(playwright, config, auto_connect=False):
+def do_search(playwright, config, auto_connect=False, local_mode=False):
     """Run the full search pipeline."""
     session_file = SESSION_DIR / "state.json"
     if not session_file.exists():
         print("No saved session found. Run with --login first.")
         sys.exit(1)
 
-    print("\n--- LinkedIn Prospector ---")
+    # Override keywords if local mode
+    location = ""
+    if local_mode:
+        local_config = config.get("local_mode", {})
+        location = local_config.get("location", "")
+        if local_config.get("search_keywords"):
+            config = {**config, "search_keywords": local_config["search_keywords"]}
+        print(f"\n--- LinkedIn Prospector [LOCAL: {location}] ---")
+    else:
+        print("\n--- LinkedIn Prospector ---")
+
     print(f"Max companies: {config['max_companies_per_run']}")
     print(f"Max people per company: {config['max_people_per_company']}")
     print(f"Delays: {config['delay_between_actions']['min_seconds']}-{config['delay_between_actions']['max_seconds']}s between actions")
@@ -819,7 +841,8 @@ def do_search(playwright, config, auto_connect=False):
 
         # Step 2: Find people at each company
         for company in companies:
-            people = find_people_at_company(page, company, config, seen_profiles)
+            people = find_people_at_company(page, company, config, seen_profiles,
+                                            local_mode=local_mode, location=location)
 
             # Step 3: Check profile activity
             for person in people:
@@ -861,14 +884,15 @@ def main():
     parser.add_argument("--login", action="store_true", help="Open browser for manual LinkedIn login")
     parser.add_argument("--search", action="store_true", help="Run the company/people search (default if no flags)")
     parser.add_argument("--connect", action="store_true", help="Auto-send connection requests with personalized notes")
+    parser.add_argument("--local", action="store_true", help="Chandigarh mode — target local companies with local messaging")
     args = parser.parse_args()
 
     # Default to search if no flags given
-    if not args.login and not args.search and not args.connect:
+    if not args.login and not args.search and not args.connect and not args.local:
         args.search = True
 
-    # --connect implies --search
-    if args.connect:
+    # --connect or --local implies --search
+    if args.connect or args.local:
         args.search = True
 
     config = load_config()
@@ -878,7 +902,7 @@ def main():
         if args.login:
             do_login(p)
         if args.search:
-            do_search(p, config, auto_connect=args.connect)
+            do_search(p, config, auto_connect=args.connect, local_mode=args.local)
 
 
 if __name__ == "__main__":
