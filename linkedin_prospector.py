@@ -941,19 +941,21 @@ def _generate_message_ai(person, local_mode=False, location=""):
         prompt = f"""Write a LinkedIn connection request note. MUST be under 300 characters total.
 
 About me: Ankit, software engineer (backend, DevOps, AWS, Kubernetes), work from home, open to contract work.
-Website: ankitbhardwaj.in
 
 About them:
 - Name: {first_name}
-- Company: {company}
-- Role: {role}
-- Headline: {headline}
+- Found at company: {company}
+- Role listed: {role}
+- Their actual LinkedIn headline: {headline}
 {local_context}
+
+IMPORTANT: Check if their headline matches the company I found them at.
+- If their headline mentions a DIFFERENT company or project (e.g. headline says "Building Bolo Buddy" but company is "Brain Point"), they probably moved on. Reference what's in their HEADLINE instead, not the old company.
+- If the headline matches the company, reference the company name (use short/common name only, not full legal name or taglines).
 
 Rules:
 - MUST be under 300 characters (this is a hard LinkedIn limit)
 - Start with "Hey {first_name}"
-- Use the short/common name of their company, not the full legal name or tagline
 - Sound like a real person texting, not a recruiter or bot
 - Keep it casual and friendly
 - Don't use corporate words like "synergy", "leverage", "opportunity"
