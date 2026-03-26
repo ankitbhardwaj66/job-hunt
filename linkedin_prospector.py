@@ -611,14 +611,36 @@ def check_profile_activity(page, person, config, local_mode=False):
         # Extract person's location from profile
         person_location = page.evaluate("""
             () => {
-                // Location is usually in the profile top card
+                // Strategy 1: Direct class match
                 const locEl = document.querySelector('.text-body-small.inline.t-black--light.break-words');
                 if (locEl) return locEl.innerText.trim();
-                // Fallback selectors
-                const spans = document.querySelectorAll('span.text-body-small');
+
+                // Strategy 2: Look for location near "Contact info" link
+                const contactLink = document.querySelector('a[href*="contact-info"]');
+                if (contactLink) {
+                    const parent = contactLink.closest('div');
+                    if (parent) {
+                        const prev = parent.previousElementSibling;
+                        if (prev) return prev.innerText.trim();
+                    }
+                }
+
+                // Strategy 3: Scan all small text spans in the top card area
+                const topCard = document.querySelector('.pv-top-card, .scaffold-layout__main');
+                const spans = (topCard || document).querySelectorAll('span');
                 for (const s of spans) {
                     const text = s.innerText.trim();
-                    if (text.includes(',') && (text.includes('India') || text.includes('England') || text.includes('United') || text.length > 5)) {
+                    // Location usually has a comma and place name
+                    if (text.match(/^[A-Z].*,.*/) && text.length < 80 && !text.includes('|') && !text.includes('@')) {
+                        return text;
+                    }
+                }
+
+                // Strategy 4: Look for text containing "India", "United", etc near top
+                const allEls = document.querySelectorAll('.text-body-small, .pv-text-details__left-panel span');
+                for (const el of allEls) {
+                    const text = el.innerText.trim();
+                    if (text.length > 3 && text.length < 60 && text.includes(',')) {
                         return text;
                     }
                 }
@@ -972,14 +994,18 @@ def _generate_message_ai(person, local_mode=False, location=""):
 
         local_context = ""
         if local_mode and location:
-            if person_location and location.lower() in person_location.lower():
-                # They're in the same city as us
+            # Chandigarh tricity area — all count as "local"
+            nearby_cities = {"chandigarh", "mohali", "sas nagar", "panchkula", "zirakpur", "kharar", "derabassi", "baddi"}
+            person_loc_lower = person_location.lower() if person_location else ""
+            is_local = any(city in person_loc_lower for city in nearby_cities)
+
+            if is_local:
                 local_context = f"""
 - I also live in {location} and work from home
-- Mention we're in the same city casually
+- They are in: {person_location} (this is near {location}, same area)
+- Mention we're from the same area casually
 - Mention I'm open for contract work"""
             else:
-                # They're in a different city/country — don't claim same city
                 local_context = f"""
 - I'm based in {location}, India, working from home
 - They are located in: {person_location or 'unknown'}
@@ -1206,6 +1232,8 @@ def do_search(playwright, config, auto_connect=False, local_mode=False):
                 for person in people:
                     if person["likely_active"]:
                         person = check_profile_activity(page, person, config, local_mode=local_mode)
+                        # Regenerate message now that we have their actual location
+                        person["message"] = generate_message(person, local_mode=local_mode, location=location)
                         # Step 4: Only send connect to active decision makers
                         if auto_connect and person.get("has_recent_activity"):
                             send_connection_request(page, person, config)
