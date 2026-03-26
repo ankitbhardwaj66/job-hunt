@@ -247,30 +247,37 @@ def search_companies(page, config):
             if len(companies) >= max_companies:
                 break
 
-            url = f"https://www.linkedin.com/search/results/companies/?keywords={quote(keyword)}&companySize=%5B%22{size_code}%22%5D"
+            base_url = f"https://www.linkedin.com/search/results/companies/?keywords={quote(keyword)}&companySize=%5B%22{size_code}%22%5D"
             if geo_id:
-                url += f"&companyHqGeo=%5B%22{geo_id}%22%5D"
+                base_url += f"&companyHqGeo=%5B%22{geo_id}%22%5D"
 
-            try:
-                page.goto(url, wait_until="domcontentloaded")
-                # Wait for search results to render
-                time.sleep(3)
-                # Scroll to trigger lazy loading
-                random_scroll(page)
-                time.sleep(2)
-                random_scroll(page)
-                time.sleep(1)
+            # Paginate through search results (up to 3 pages)
+            for page_num in range(1, 4):
+                if len(companies) >= max_companies:
+                    break
 
-                # Try to wait for result list items
+                url = base_url if page_num == 1 else f"{base_url}&page={page_num}"
+
                 try:
-                    page.wait_for_selector('a[href*="/company/"]', timeout=8000)
-                except PlaywrightTimeout:
-                    print(f"  No company links found for '{keyword}' (size {size_code})")
-                    debug_snapshot(page, f"no_results_{keyword.replace(' ', '_')}_{size_code}")
-                    continue
+                    page.goto(url, wait_until="domcontentloaded")
+                    time.sleep(3)
+                    random_scroll(page)
+                    time.sleep(2)
+                    random_scroll(page)
+                    time.sleep(1)
 
-                page_companies = extract_companies_from_page(page)
-                print(f"  Extracted {len(page_companies)} companies from page")
+                    try:
+                        page.wait_for_selector('a[href*="/company/"]', timeout=8000)
+                    except PlaywrightTimeout:
+                        if page_num == 1:
+                            print(f"  No company links found for '{keyword}' (size {size_code})")
+                            debug_snapshot(page, f"no_results_{keyword.replace(' ', '_')}_{size_code}")
+                        break  # No more pages
+
+                    page_companies = extract_companies_from_page(page)
+                    if not page_companies:
+                        break  # No more results
+                    print(f"  Extracted {len(page_companies)} companies from page {page_num}")
 
                 # Build skip words from all search keywords + generic filler words
                 skip_words = set()
@@ -417,12 +424,14 @@ def search_companies(page, config):
                     })
                     print(f"    + {comp['name']}")
 
-                action_delay(config)
+                    action_delay(config)
 
-            except PlaywrightTimeout:
-                print(f"  Timeout searching for {keyword}, moving on...")
-            except Exception as e:
-                print(f"  Error searching for {keyword}: {e}")
+                except PlaywrightTimeout:
+                    print(f"  Timeout on page {page_num} for {keyword}, moving on...")
+                    break
+                except Exception as e:
+                    print(f"  Error on page {page_num} for {keyword}: {e}")
+                    break
 
     print(f"\nFound {len(companies)} companies total.")
     return companies
