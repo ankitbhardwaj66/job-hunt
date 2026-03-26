@@ -221,6 +221,10 @@ def search_companies(page, config):
                     "inc", "ltd", "llc", "pvt", "co", "corp", "group", "global",
                     "solutions", "services", "enterprise", "initiative", "leaders",
                     "markets", "search", "confidential", "stealth",
+                    "school", "academy", "lab", "labs", "hub", "network",
+                    "community", "club", "institute", "center", "centre",
+                    "factory", "incubator", "accelerator", "collective",
+                    "platform", "digital", "online", "pro", "plus",
                 }
 
                 for comp in page_companies:
