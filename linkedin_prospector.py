@@ -770,22 +770,41 @@ def send_connection_request(page, person, config):
                 }
             """)
             if more_btn:
-                time.sleep(1.5)
+                time.sleep(2)
+                # Try multiple selectors — LinkedIn dropdown structure varies
                 connect_clicked = page.evaluate("""
-                    (firstName) => {
-                        const items = document.querySelectorAll('[role="listbox"] li, .artdeco-dropdown__content li, .artdeco-dropdown__content-inner li');
-                        for (const item of items) {
-                            const text = item.innerText.trim().toLowerCase();
-                            if (text.includes('connect')) {
-                                item.click();
-                                return 'dropdown';
+                    () => {
+                        // Strategy 1: Any visible element with text "Connect" in dropdown areas
+                        const dropdowns = document.querySelectorAll(
+                            '.artdeco-dropdown__content, [role="listbox"], .artdeco-dropdown__content-inner, .pvs-overflow-actions-dropdown__content'
+                        );
+                        for (const dd of dropdowns) {
+                            const items = dd.querySelectorAll('li, div[role="option"], a, span');
+                            for (const item of items) {
+                                if (item.innerText.trim() === 'Connect' && item.offsetParent !== null) {
+                                    item.click();
+                                    return 'dropdown_exact';
+                                }
+                            }
+                        }
+                        // Strategy 2: Any visible span/div with exact text "Connect" that appeared recently
+                        const allEls = document.querySelectorAll('span, div, li');
+                        for (const el of allEls) {
+                            if (el.innerText.trim() === 'Connect'
+                                && el.offsetParent !== null
+                                && el.closest('.artdeco-dropdown, [class*="dropdown"], [class*="overflow"]')) {
+                                el.click();
+                                return 'dropdown_broad';
                             }
                         }
                         return null;
                     }
-                """, first_name)
+                """)
                 if not connect_clicked:
                     page.keyboard.press("Escape")
+                else:
+                    # Extra wait after dropdown connect — modal takes longer to appear
+                    time.sleep(2)
 
         if not connect_clicked:
             print(f"    [connect] No Connect button found for {person['name']}")
@@ -793,11 +812,14 @@ def send_connection_request(page, person, config):
             return False
 
         print(f"    [connect] Clicked Connect ({connect_clicked}), waiting for modal...")
-        time.sleep(3)
+        # Longer wait if connect came from dropdown
+        wait_time = 5 if "dropdown" in str(connect_clicked) else 3
+        time.sleep(wait_time)
 
         # Look for "Add a note" button in the modal — try multiple times
         add_note_btn = False
-        for attempt in range(3):
+        max_attempts = 5 if "dropdown" in str(connect_clicked) else 3
+        for attempt in range(max_attempts):
             add_note_btn = page.evaluate("""
                 () => {
                     const buttons = document.querySelectorAll('button');
@@ -814,7 +836,7 @@ def send_connection_request(page, person, config):
             """)
             if add_note_btn:
                 break
-            print(f"    [connect] Waiting for 'Add a note' button (attempt {attempt + 1}/3)...")
+            print(f"    [connect] Waiting for 'Add a note' button (attempt {attempt + 1}/{max_attempts})...")
             time.sleep(2)
 
         if add_note_btn:
