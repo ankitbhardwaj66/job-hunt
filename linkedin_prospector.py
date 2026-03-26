@@ -209,13 +209,19 @@ def search_companies(page, config):
                 page_companies = extract_companies_from_page(page)
                 print(f"  Extracted {len(page_companies)} companies from page")
 
-                # Build skip words from all search keywords
+                # Build skip words from all search keywords + generic filler words
                 skip_words = set()
                 for kw in keywords:
                     skip_words.add(kw.lower())
                     for word in kw.lower().split():
-                        if word not in ("and", "the", "of", "a", "an", "in", "for"):
-                            skip_words.add(word)
+                        skip_words.add(word)
+                # Generic words that don't make a company name unique
+                filler_words = {
+                    "and", "the", "of", "a", "an", "in", "for", "by", "page",
+                    "inc", "ltd", "llc", "pvt", "co", "corp", "group", "global",
+                    "solutions", "services", "enterprise", "initiative", "leaders",
+                    "markets", "search", "confidential", "stealth",
+                }
 
                 for comp in page_companies:
                     if len(companies) >= max_companies:
@@ -223,12 +229,14 @@ def search_companies(page, config):
                     if comp["slug"] in seen_companies:
                         continue
 
-                    # Skip companies whose name is just the search keyword
-                    # e.g. "SaaS Company", "Tech Startup", "AI Startup School"
+                    # Skip companies whose name is mostly generic/keyword words
+                    # e.g. "SaaS Company", "Saas and Enterprise Software Company"
                     name_lower = comp["name"].lower().strip()
-                    name_words = set(name_lower.split()) - {"and", "the", "of", "a", "an", "in", "for", "by", "page"}
-                    if name_words and name_words.issubset(skip_words):
-                        print(f"    [skip] {comp['name']} — name matches search keywords")
+                    name_words = [w for w in name_lower.replace(".", " ").split() if w]
+                    # Remove filler words, then check if remaining are all skip words
+                    meaningful_words = [w for w in name_words if w not in filler_words]
+                    if meaningful_words and all(w in skip_words for w in meaningful_words):
+                        print(f"    [skip] {comp['name']} — generic/keyword name")
                         continue
 
                     seen_companies.add(comp["slug"])
@@ -639,10 +647,10 @@ def sync_to_google_sheets(config):
                 existing_urls = {row[url_col] for row in existing_data[1:] if len(row) > url_col}
             else:
                 existing_urls = set()
-                sheet.update("A1", [FIELDNAMES])
+                sheet.update(values=[FIELDNAMES], range_name="A1")
         else:
             existing_urls = set()
-            sheet.update("A1", [FIELDNAMES])
+            sheet.update(values=[FIELDNAMES], range_name="A1")
 
         # Read all prospects from CSV
         output_file = SCRIPT_DIR / config["output_file"]
@@ -655,7 +663,7 @@ def sync_to_google_sheets(config):
 
         if new_rows:
             next_row = len(existing_data) + 1 if existing_data else 2
-            sheet.update(f"A{next_row}", new_rows)
+            sheet.update(values=new_rows, range_name=f"A{next_row}")
             print(f"  [sheets] Added {len(new_rows)} new rows to Google Sheet")
         else:
             print(f"  [sheets] No new rows to add (all already in sheet)")
