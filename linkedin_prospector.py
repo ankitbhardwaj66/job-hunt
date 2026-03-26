@@ -173,6 +173,7 @@ def search_companies(page, config):
     seen_companies = set()
     max_companies = config["max_companies_per_run"]
     keywords = config["search_keywords"]
+    geo_id = config.get("_geo_id", "")  # set by do_search for local mode
 
     random.shuffle(keywords)
 
@@ -187,6 +188,8 @@ def search_companies(page, config):
                 break
 
             url = f"https://www.linkedin.com/search/results/companies/?keywords={quote(keyword)}&companySize=%5B%22{size_code}%22%5D"
+            if geo_id:
+                url += f"&companyHqGeo=%5B%22{geo_id}%22%5D"
 
             try:
                 page.goto(url, wait_until="domcontentloaded")
@@ -796,13 +799,17 @@ def do_search(playwright, config, auto_connect=False, local_mode=False):
         print("No saved session found. Run with --login first.")
         sys.exit(1)
 
-    # Override keywords if local mode
+    # Override keywords and set geo filter if local mode
     location = ""
     if local_mode:
         local_config = config.get("local_mode", {})
         location = local_config.get("location", "")
+        geo_id = local_config.get("geo_id", "")
+        config = {**config}
         if local_config.get("search_keywords"):
-            config = {**config, "search_keywords": local_config["search_keywords"]}
+            config["search_keywords"] = local_config["search_keywords"]
+        if geo_id:
+            config["_geo_id"] = geo_id
         print(f"\n--- LinkedIn Prospector [LOCAL: {location}] ---")
     else:
         print("\n--- LinkedIn Prospector ---")

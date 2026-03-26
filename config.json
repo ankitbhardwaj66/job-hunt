@@ -34,16 +34,17 @@
   "output_file": "prospects.csv",
   "local_mode": {
     "location": "Chandigarh",
+    "geo_id": "105765876",
     "search_keywords": [
-      "software company Chandigarh",
-      "IT company Chandigarh",
-      "tech startup Chandigarh",
-      "web development Chandigarh",
-      "app development Chandigarh",
-      "SaaS Chandigarh",
-      "IT services Chandigarh Mohali",
-      "software Mohali",
-      "tech Panchkula"
+      "software company",
+      "IT company",
+      "tech startup",
+      "web development",
+      "app development",
+      "SaaS",
+      "IT services",
+      "cloud services",
+      "software development"
     ]
   },
   "google_sheets": {
