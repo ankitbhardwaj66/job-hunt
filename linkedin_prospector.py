@@ -958,6 +958,7 @@ Rules:
 - Keep it casual and friendly
 - Don't use corporate words like "synergy", "leverage", "opportunity"
 - Don't mention my website
+- Do NOT use any emojis
 - End with something like "Would love to connect!" or "Let's connect!"
 - Just output the message, nothing else"""
 
