@@ -525,8 +525,8 @@ def find_people_at_company(page, company, config, seen_profiles, local_mode=Fals
     return people
 
 
-def check_profile_activity(page, person, config):
-    """Visit profile activity page — check for any 2+ activities (posts, comments, reactions) in last 30 days."""
+def check_profile_activity(page, person, config, local_mode=False):
+    """Visit profile activity page — check for any 2+ activities in last 30 days (60 for local)."""
     try:
         # Visit profile first for connection degree
         page.goto(person["profile_url"], wait_until="domcontentloaded")
@@ -545,9 +545,10 @@ def check_profile_activity(page, person, config):
         random_scroll(page)
         time.sleep(2)
 
-        # Count any activity in last 30 days — posts, comments, reactions, shares
+        # Count any activity — 30 days for global, 60 days for local
+        activity_days = 60 if local_mode else 30
         recent_activity_count = page.evaluate("""
-            () => {
+            (days) => {
                 let count = 0;
 
                 // Helper: parse relative time text to days ago
@@ -579,13 +580,13 @@ def check_profile_activity(page, person, config):
                     seen.add(text);
 
                     const daysAgo = parseDaysAgo(text);
-                    if (daysAgo !== null && daysAgo <= 30) {
+                    if (daysAgo !== null && daysAgo <= days) {
                         count++;
                     }
                 }
 
                 // Strategy 2: <time> elements with datetime attributes
-                const cutoff = Date.now() - (30 * 24 * 60 * 60 * 1000);
+                const cutoff = Date.now() - (days * 24 * 60 * 60 * 1000);
                 const timeTags = document.querySelectorAll('time[datetime]');
                 for (const t of timeTags) {
                     const key = t.getAttribute('datetime');
@@ -599,14 +600,14 @@ def check_profile_activity(page, person, config):
 
                 return count;
             }
-        """)
+        """, activity_days)
 
         person["recent_activity_30d"] = recent_activity_count
         person["has_recent_activity"] = recent_activity_count >= 2
         if person["has_recent_activity"]:
-            print(f"    [active] {person['name']} — {recent_activity_count} activities in last 30 days")
+            print(f"    [active] {person['name']} — {recent_activity_count} activities in last {activity_days} days")
         else:
-            print(f"    [inactive] {person['name']} — only {recent_activity_count} activities in last 30 days, skipping connect")
+            print(f"    [inactive] {person['name']} — only {recent_activity_count} activities in last {activity_days} days, skipping connect")
 
     except Exception as e:
         print(f"    [activity] Error checking {person['name']}: {e}")
@@ -949,7 +950,7 @@ def do_search(playwright, config, auto_connect=False, local_mode=False):
             # Step 3: Check profile activity
             for person in people:
                 if person["likely_active"]:
-                    person = check_profile_activity(page, person, config)
+                    person = check_profile_activity(page, person, config, local_mode=local_mode)
                     # Step 4: Only send connect to active decision makers (2+ posts in 30 days)
                     if auto_connect and person.get("has_recent_activity"):
                         send_connection_request(page, person, config)
