@@ -1120,14 +1120,32 @@ def do_search(playwright, config, auto_connect=False, local_mode=False):
             people = find_people_at_company(page, company, config, seen_profiles,
                                             local_mode=local_mode, location=location)
 
-            # Step 3: Check profile activity
-            for person in people:
-                if person["likely_active"]:
-                    person = check_profile_activity(page, person, config, local_mode=local_mode)
-                    # Step 4: Only send connect to active decision makers (2+ posts in 30 days)
-                    if auto_connect and person.get("has_recent_activity"):
-                        send_connection_request(page, person, config)
-                    page_delay(config)
+            if not people:
+                # No decision-makers found — add a placeholder so we skip this company next run
+                all_prospects.append({
+                    "name": "no_contact_found",
+                    "profile_url": "",
+                    "company": company["name"],
+                    "company_url": company["url"],
+                    "matched_role": "",
+                    "has_recent_activity": "",
+                    "recent_activity_30d": "",
+                    "connection_degree": "",
+                    "found_date": datetime.now().strftime("%Y-%m-%d"),
+                    "message": "",
+                    "connect_sent": "",
+                    "local": "yes" if local_mode else "no",
+                })
+                print(f"    No decision-makers found, marking company as visited")
+            else:
+                # Step 3: Check profile activity
+                for person in people:
+                    if person["likely_active"]:
+                        person = check_profile_activity(page, person, config, local_mode=local_mode)
+                        # Step 4: Only send connect to active decision makers
+                        if auto_connect and person.get("has_recent_activity"):
+                            send_connection_request(page, person, config)
+                        page_delay(config)
 
             all_prospects.extend(people)
 
