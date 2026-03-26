@@ -167,10 +167,27 @@ def extract_companies_from_page(page):
     return found
 
 
+def _load_existing_company_slugs(config):
+    """Load company slugs from existing CSV to skip already-prospected companies."""
+    slugs = set()
+    output_file = SCRIPT_DIR / config["output_file"]
+    if output_file.exists():
+        with open(output_file, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                url = row.get("company_url", "")
+                match = re.search(r'/company/([^/?]+)', url)
+                if match:
+                    slugs.add(match.group(1))
+    if slugs:
+        print(f"Loaded {len(slugs)} already-prospected companies from CSV")
+    return slugs
+
+
 def search_companies(page, config):
     """Search LinkedIn for small tech companies and return company info."""
     companies = []
-    seen_companies = set()
+    seen_companies = _load_existing_company_slugs(config)
     max_companies = config["max_companies_per_run"]
     keywords = config["search_keywords"]
     geo_id = config.get("_geo_id", "")  # set by do_search for local mode
@@ -262,6 +279,7 @@ def search_companies(page, config):
                     if len(companies) >= max_companies:
                         break
                     if comp["slug"] in seen_companies:
+                        print(f"    [skip] {comp['name']} — already prospected")
                         continue
 
                     orig_name = comp["name"].strip()
