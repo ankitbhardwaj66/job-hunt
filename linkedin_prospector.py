@@ -217,14 +217,40 @@ def search_companies(page, config):
                         skip_words.add(word)
                 # Generic words that don't make a company name unique
                 filler_words = {
+                    # Connectors
                     "and", "the", "of", "a", "an", "in", "for", "by", "page",
+                    "first", "best", "top", "leading", "new", "next", "gen",
+                    # Business suffixes
                     "inc", "ltd", "llc", "pvt", "co", "corp", "group", "global",
                     "solutions", "services", "enterprise", "initiative", "leaders",
                     "markets", "search", "confidential", "stealth",
+                    # Org types
                     "school", "academy", "lab", "labs", "hub", "network",
                     "community", "club", "institute", "center", "centre",
                     "factory", "incubator", "accelerator", "collective",
                     "platform", "digital", "online", "pro", "plus",
+                    # Countries
+                    "india", "usa", "uk", "us", "china", "japan", "korea",
+                    "vietnam", "singapore", "indonesia", "malaysia", "thailand",
+                    "philippines", "pakistan", "bangladesh", "nepal", "sri lanka",
+                    "germany", "france", "spain", "italy", "netherlands", "sweden",
+                    "norway", "denmark", "finland", "poland", "switzerland",
+                    "australia", "canada", "brazil", "mexico", "argentina",
+                    "nigeria", "kenya", "south africa", "egypt", "uae", "dubai",
+                    "israel", "turkey", "russia", "ukraine", "ireland",
+                    "europe", "asia", "africa", "mena", "latam", "apac",
+                    # Major cities
+                    "london", "berlin", "paris", "mumbai", "delhi", "bangalore",
+                    "bengaluru", "hyderabad", "chennai", "pune", "kolkata",
+                    "new york", "san francisco", "seattle", "austin", "boston",
+                    "toronto", "sydney", "melbourne", "tokyo", "seoul",
+                    "shanghai", "beijing", "hong kong", "hanoi", "jakarta",
+                    "dubai", "tel aviv", "amsterdam", "stockholm", "lisbon",
+                }
+                # Also match multi-word locations as single tokens
+                _location_phrases = {
+                    "sri lanka", "south africa", "new york", "san francisco",
+                    "hong kong", "tel aviv", "new zealand",
                 }
 
                 for comp in page_companies:
@@ -236,6 +262,11 @@ def search_companies(page, config):
                     # Skip companies whose name is mostly generic/keyword words
                     # e.g. "SaaS Company", "Saas and Enterprise Software Company"
                     name_lower = comp["name"].lower().strip()
+                    # Remove multi-word locations first
+                    for phrase in _location_phrases:
+                        name_lower = name_lower.replace(phrase, " ")
+                    # Remove anything after " - " (taglines like "the first AI agency in Vietnam")
+                    name_lower = name_lower.split(" - ")[0].strip()
                     name_words = [w for w in name_lower.replace(".", " ").split() if w]
                     # Remove filler words, then check if remaining are all skip words
                     meaningful_words = [w for w in name_words if w not in filler_words]
