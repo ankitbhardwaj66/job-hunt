@@ -953,14 +953,17 @@ About them:
 
 IMPORTANT: Check if their headline matches the company I found them at.
 - If their headline mentions a DIFFERENT company or project (e.g. headline says "Building Bolo Buddy" but company is "Brain Point"), they probably moved on. Reference what's in their HEADLINE instead, not the old company.
-- If the headline matches the company, reference the company name (use short/common name only, not full legal name or taglines).
+- If the headline matches the company OR the headline is just a generic tagline/motto (e.g. "Convert Ideas Into Reality"), ALWAYS mention the company name in the message. Use the short/common name only, not full legal name or taglines.
+- When in doubt, mention the company name. Only skip it if the headline clearly references a different company.
 
 Rules:
 - MUST be under 300 characters (this is a hard LinkedIn limit)
 - Start with "Hey {first_name}"
+- ALWAYS try to mention their company name (short form) in the message
 - Sound like a real person texting, not a recruiter or bot
 - Keep it casual and friendly
 - Don't use corporate words like "synergy", "leverage", "opportunity"
+- Don't just repeat their tagline/motto back to them
 - Don't mention my website
 - Do NOT use any emojis
 - End with something like "Would love to connect!" or "Let's connect!"
