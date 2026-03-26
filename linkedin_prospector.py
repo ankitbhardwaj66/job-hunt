@@ -209,11 +209,28 @@ def search_companies(page, config):
                 page_companies = extract_companies_from_page(page)
                 print(f"  Extracted {len(page_companies)} companies from page")
 
+                # Build skip words from all search keywords
+                skip_words = set()
+                for kw in keywords:
+                    skip_words.add(kw.lower())
+                    for word in kw.lower().split():
+                        if word not in ("and", "the", "of", "a", "an", "in", "for"):
+                            skip_words.add(word)
+
                 for comp in page_companies:
                     if len(companies) >= max_companies:
                         break
                     if comp["slug"] in seen_companies:
                         continue
+
+                    # Skip companies whose name is just the search keyword
+                    # e.g. "SaaS Company", "Tech Startup", "AI Startup School"
+                    name_lower = comp["name"].lower().strip()
+                    name_words = set(name_lower.split()) - {"and", "the", "of", "a", "an", "in", "for", "by", "page"}
+                    if name_words and name_words.issubset(skip_words):
+                        print(f"    [skip] {comp['name']} — name matches search keywords")
+                        continue
+
                     seen_companies.add(comp["slug"])
 
                     companies.append({
@@ -373,23 +390,77 @@ def find_people_at_company(page, company, config, seen_profiles):
 
 
 def check_profile_activity(page, person, config):
-    """Visit a profile to check if they're recently active on LinkedIn."""
+    """Visit profile and activity page to check if they posted 2+ times in last 30 days."""
     try:
+        # Visit profile first for connection degree
         page.goto(person["profile_url"], wait_until="domcontentloaded")
         page_delay(config)
-        random_scroll(page)
-
-        # Check for recent activity section
-        activity_section = page.query_selector('section.artdeco-card a[href*="/recent-activity/"]')
-        person["has_recent_activity"] = bool(activity_section)
 
         # Try to get connection degree
         degree_badge = page.query_selector('span.dist-value')
         if degree_badge:
             person["connection_degree"] = degree_badge.inner_text().strip()
 
-    except Exception:
+        # Now visit their activity page to count recent posts
+        profile_slug = person["profile_url"].rstrip("/").split("/")[-1]
+        activity_url = f"https://www.linkedin.com/in/{profile_slug}/recent-activity/all/"
+        page.goto(activity_url, wait_until="domcontentloaded")
+        time.sleep(3)
+        random_scroll(page)
+        time.sleep(2)
+
+        # Extract post dates from the activity feed
+        # LinkedIn shows relative times like "1d", "3d", "1w", "2w", "1mo"
+        recent_post_count = page.evaluate("""
+            () => {
+                const now = Date.now();
+                const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+                const cutoff = now - thirtyDaysMs;
+                let count = 0;
+
+                // Look for time elements in activity feed
+                const timeEls = document.querySelectorAll('time, span.feed-shared-actor__sub-description span[aria-hidden="true"], span.update-components-actor__sub-description span[aria-hidden="true"]');
+                for (const el of timeEls) {
+                    const text = el.innerText.trim().toLowerCase();
+                    // Parse relative time strings
+                    let daysAgo = null;
+                    if (text.includes('just now') || text.includes('moment')) daysAgo = 0;
+                    else if (text.match(/(\d+)\s*m\b/) && !text.includes('mo')) daysAgo = 0;  // minutes
+                    else if (text.match(/(\d+)\s*h/)) daysAgo = 0;  // hours
+                    else if (text.match(/(\d+)\s*d/)) daysAgo = parseInt(text.match(/(\d+)\s*d/)[1]);
+                    else if (text.match(/(\d+)\s*w/)) daysAgo = parseInt(text.match(/(\d+)\s*w/)[1]) * 7;
+                    else if (text.match(/(\d+)\s*mo/)) daysAgo = parseInt(text.match(/(\d+)\s*mo/)[1]) * 30;
+                    else if (text.match(/(\d+)\s*yr/)) daysAgo = parseInt(text.match(/(\d+)\s*yr/)[1]) * 365;
+
+                    if (daysAgo !== null && daysAgo <= 30) {
+                        count++;
+                    }
+                }
+
+                // Also try datetime attributes on <time> elements
+                const timeTags = document.querySelectorAll('time[datetime]');
+                for (const t of timeTags) {
+                    const dt = new Date(t.getAttribute('datetime'));
+                    if (dt.getTime() > cutoff) {
+                        count++;
+                    }
+                }
+
+                return count;
+            }
+        """)
+
+        person["recent_posts_30d"] = recent_post_count
+        person["has_recent_activity"] = recent_post_count >= 2
+        if person["has_recent_activity"]:
+            print(f"    [active] {person['name']} — {recent_post_count} posts in last 30 days")
+        else:
+            print(f"    [inactive] {person['name']} — only {recent_post_count} posts in last 30 days, skipping connect")
+
+    except Exception as e:
+        print(f"    [activity] Error checking {person['name']}: {e}")
         person["has_recent_activity"] = None
+        person["recent_posts_30d"] = 0
 
     return person
 
@@ -480,7 +551,7 @@ def send_connection_request(page, person, config):
 
 FIELDNAMES = [
     "name", "profile_url", "company", "company_url",
-    "matched_role", "likely_active", "has_recent_activity",
+    "matched_role", "has_recent_activity", "recent_posts_30d",
     "connection_degree", "found_date", "message", "connect_sent",
 ]
 
@@ -642,8 +713,8 @@ def do_search(playwright, config, auto_connect=False):
             for person in people:
                 if person["likely_active"]:
                     person = check_profile_activity(page, person, config)
-                    # Step 4: Send connection request if --connect flag is set
-                    if auto_connect:
+                    # Step 4: Only send connect to active decision makers (2+ posts in 30 days)
+                    if auto_connect and person.get("has_recent_activity"):
                         send_connection_request(page, person, config)
                     page_delay(config)
 
