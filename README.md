@@ -1,15 +1,13 @@
 # LinkedIn Prospector
 
-Automated tool to find small tech companies, identify decision-makers, and send personalized LinkedIn connection requests.
+Automated tool to find small tech companies, identify decision-makers and senior engineers, and send personalized LinkedIn connection requests.
 
 ## Setup
 
 ```bash
-# Clone
 git clone git@github.com:ankitbhardwaj66/job-hunt.git
 cd job-hunt
 
-# Run (creates venv, installs deps on first run)
 ./run.sh --login   # First time: opens browser for manual LinkedIn login
 ```
 
@@ -22,6 +20,8 @@ export ANTHROPIC_API_KEY=your_key_here
 1. Share your Google Sheet with `stock-screener@xirrledger.iam.gserviceaccount.com` (Editor)
 2. Update `sheet_url` in `config.json`
 
+---
+
 ## Usage
 
 ```bash
@@ -32,79 +32,122 @@ export ANTHROPIC_API_KEY=your_key_here
 ./run.sh --login            # Re-login if session expired
 ```
 
+---
+
+## Flow
+
+```mermaid
+flowchart TD
+    A([Start Run]) --> B
+
+    subgraph SEARCH["① Company Search"]
+        B[Pick current industry\nfrom industry_codes list\nsave next index → .industry_state.json]
+        B --> C[Build faceted LinkedIn URL\ncompanySize=C 11-50\nindustryCompanyVertical=current industry]
+        C --> D[Paginate up to 10 pages]
+        D --> E{Company on page?}
+        E -->|yes| F{Pass filters?\nstealth · VC · recruiter\ncountry name · placeholder}
+        F -->|pass| G[Add to companies list]
+        F -->|fail| E
+        G --> H{max_companies\nreached?}
+        H -->|no| E
+        H -->|yes| I
+        E -->|no more pages| I
+    end
+
+    I([For each company]) --> J
+
+    subgraph PEOPLE["② Find People"]
+        J[Go to company/people/\n?keywords=manager,cto,vp,\nhead,president,chief,architect,senior]
+        J --> K[Click Show more results\nup to 5×]
+        K --> L[Extract all visible people]
+        L --> M[Apply exclude filter\ndevelopers · interns · recruiters\ndesigners · students]
+        M --> N{More than\n10 candidates?}
+        N -->|yes| O[AI picks best 10\nbased on visible headlines]
+        N -->|no| P
+        O --> P[Candidate list ready]
+    end
+
+    P --> Q([For each candidate]) --> R
+
+    subgraph PROFILE["③ Profile Check"]
+        R[Visit profile\nGet degree + location]
+        R --> S{Open to Work\nbadge?}
+        S -->|yes| SKIP([Skip])
+        S -->|no| T[Scroll to load\nExperience section]
+        T --> U[Find title at\nTHIS company]
+        U --> V{AI decision}
+        V -->|decision_maker\nCTO · VP · Manager · Architect| W[Continue]
+        V -->|senior_engineer\n8+ yrs backend/DevOps| W
+        V -->|skip| SKIP
+        W --> X[Check activity\n2+ posts/comments in 60 days]
+        X -->|inactive| SAVE
+        X -->|active| Y[Generate message\ndifferent for each target type]
+    end
+
+    Y --> Z
+
+    subgraph CONNECT["④ Connect"]
+        Z{auto-connect\n& under limit?}
+        Z -->|no| SAVE
+        Z -->|yes| AA[Navigate to profile\nFind Connect button]
+        AA --> AB[Add personalized note\nunder 300 chars]
+        AB --> SAVE
+    end
+
+    SAVE([Save to Google Sheet])
+```
+
+---
+
+## Target Types & Messages
+
+| Type | Who | Message style |
+|------|-----|---------------|
+| `decision_maker` | CTO, VP Eng, Engineering Manager, Tech Architect, Head of Eng | "I'm Ankit, backend/DevOps engineer, 10+ yrs exp... open to contract work. Let's connect!" |
+| `senior_engineer` | Senior backend/DevOps/cloud engineer with 8+ yrs total exp | "I'm Ankit... if you're working on something interesting and need an extra hand on a contractual basis — I'm available." |
+
+---
+
 ## How It Works
 
 ### Global Mode (`./run.sh --connect`)
 
-**Target:** Small tech companies (11-50 employees) worldwide.
+**Target:** Small tech companies (11–50 employees) worldwide.
 
-1. **Search** LinkedIn using faceted filters — no keywords. Filters set in `config.json`:
-   - `industry_codes`: list of industries to rotate through (one per run)
-   - `company_size_codes`: `["C"]` = 11–50 employees
-   - Each run searches one industry, saves progress to `.industry_state.json`, picks the next one next run, loops
-   - Paginates up to 10 pages per run
-2. **Filter out** spammy/generic companies:
-   - Companies with country names ("OrpinsAI USA")
-   - Incubators, academies, VC firms, communities, events
-   - Companies in `skip_companies` list (e.g. past employers)
-   - Already prospected companies (checked against Google Sheet)
-3. **Find decision-makers** at each company:
-   - Collects all employees from the company's people page
-   - Excludes obvious non-targets by headline (developers, interns, recruiters, etc.)
-   - Visits each remaining profile and reads the **Experience section** to get their actual job title
-   - Falls back to headline text if experience section hasn't loaded
-   - Sorted by priority: CTO → Engineering Manager / Tech Lead → Head of Eng → VP Eng → Director → President → CEO → Founder
-4. **Filter out non-targets:**
-   - Individual contributors (developers, engineers, architects)
-   - Mid-level managers (project managers, scrum masters)
-   - Job seekers (Open to Work badge)
-   - Recruiters, trainers, designers, staffing/recruitment agencies
-5. **Check activity** on their profile — must have 2+ activities (posts, comments, reactions) in last **60 days**
-6. **Generate message** using Claude AI:
-   - Direct intro: "I'm Ankit, backend/DevOps engineer with 10+ yrs exp..."
-   - Under 300 characters, no greeting, no emojis
-   - Mentions open to contract work
-7. **Send connection request** with personalized note:
-   - Matches Connect button by person's name (avoids sidebar clicks)
-   - Tries main button first, then More dropdown
-   - Retries "Add a note" button up to 3-5 times
-   - Logs `sent_no_note` if LinkedIn sends without note option
-8. **Save to Google Sheet** with clickable links on name and company
+1. **Industry rotation** — each run searches one industry, saves index to `.industry_state.json`, picks the next one next run, loops. Reset by deleting the file.
+2. **Company filters** — skips stealth companies, VCs, recruitment agencies, placeholders ("Startup"), companies with country names in the name, incubators, etc.
+3. **People search** — hits `company/people/?keywords=manager,cto,vp,head,president,chief,architect,senior` to pre-filter by title keywords, then clicks "Show more results" up to 5× to load all matches.
+4. **AI candidate selection** — if more than 10 people pass the exclude filter, Claude Haiku picks the best 10 based on visible headlines before any profile is visited.
+5. **Profile + experience check** — visits each selected profile, scrolls to load the Experience section, finds the person's title **at this specific company**, then asks AI: decision-maker / senior engineer / skip?
+6. **Activity check** — must have 2+ activities (posts, comments, reactions) in last 60 days.
+7. **Personalized message** — generated by Claude AI, different for decision-makers vs senior engineers. Under 300 chars, no greeting, no emojis.
+8. **Connection request** — finds the Connect button by person's name, adds note, sends.
 
 ### Local Mode (`./run.sh --local --connect`)
 
-**Target:** Companies headquartered in Chandigarh (11-50 employees).
-
-Everything from global mode, plus:
-
-- **Location filter** uses LinkedIn's `companyHqGeo` parameter (Chandigarh geo ID: `104458930`)
-- **Activity window** is **60 days** (smaller local pool)
-- **Detects person's location** from their profile before messaging
-- **Chandigarh tricity** — Mohali, SAS Nagar, Panchkula, Zirakpur, Kharar, Derabassi, Baddi all count as local
-- **Message adapts to location:**
-  - Person in Chandigarh/tricity: "Hey, fellow Chandigarh person here! ..."
-  - Person elsewhere (e.g. CEO in England): "Hey, I'm a remote engineer based in India ..." (no false locality claim)
-- Local prospects marked with `local: yes` in Google Sheet
+Same as global, plus:
+- Adds `companyHqGeo` filter for Chandigarh (geo ID `104458930`)
+- Message adapts: tricity people get local angle, others get remote angle
 
 ### What Gets Saved to Google Sheet
 
 | Column | Description |
-|---|---|
+|--------|-------------|
 | name | Clickable link to LinkedIn profile |
 | company | Clickable link to company page |
-| matched_role | Role that matched (cto, founder, etc.) |
-| has_recent_activity | True if 2+ activities in window |
-| recent_activity_30d | Number of activities found |
-| connection_degree | 1st, 2nd, 3rd |
+| matched_role | Role label from AI (e.g. "cto", "senior devops engineer") |
+| has_recent_activity | True if 2+ activities in 60 days |
+| recent_activity_30d | Count of activities found |
+| connection_degree | 1st / 2nd / 3rd |
 | found_date | Date prospected |
 | connect_sent | True / sent_no_note / False |
 | local | yes / no |
 
-Companies with no decision-makers get a `no_contact_found` row so they're skipped on next run.
+Companies with no matching people get a `no_contact_found` row so they're skipped on the next run.
+
+---
 
 ## Config
-
-Edit `config.json`:
 
 ```json
 {
@@ -114,6 +157,7 @@ Edit `config.json`:
   "max_connects_per_company": 2,
   "skip_companies": ["Netsmartz"],
   "delay_between_actions": { "min_seconds": 3, "max_seconds": 8 },
+  "delay_between_pages": { "min_seconds": 5, "max_seconds": 12 },
   "local_mode": {
     "location": "Chandigarh",
     "geo_id": "104458930"
@@ -121,7 +165,7 @@ Edit `config.json`:
 }
 ```
 
-### Industry Codes Reference
+### Industry Codes
 
 | Code | Industry |
 |------|----------|
@@ -133,9 +177,9 @@ Edit `config.json`:
 | `5`  | Computer Networking |
 | `2458` | Data Infrastructure and Analytics |
 
-Each run searches one industry in order and saves the current position to `.industry_state.json`. Delete that file to reset. To jump to a specific industry, set `{"last_index": N}` in it.
+To add more: LinkedIn company search → Industry filter → select → copy code from URL's `industryCompanyVertical` param.
 
-To add more industries: go to LinkedIn company search → Industry filter → select the industry → copy the code from the URL's `industryCompanyVertical` parameter.
+To jump to a specific industry: set `{"last_index": N}` in `.industry_state.json` (0-indexed).
 
 ### Company Size Codes
 
@@ -145,12 +189,14 @@ To add more industries: go to LinkedIn company search → Industry filter → se
 | `C`  | 11–50 |
 | `D`  | 51–200 |
 
+---
+
 ## Safety
 
-- Random delays between actions (3-12s)
-- Real Chrome browser (not headless)
-- Hides automation flags
-- Session persisted locally (no credentials in code)
-- Pagination up to 10 pages per run
+- Random delays between all actions (3–12s)
+- Real Chrome browser, not headless
+- Automation flags hidden
+- Session saved locally — no credentials in code
 - Max 2 connects per company
 - Never sends connect without trying to add a note first
+- `Ctrl+C` safely saves whatever was collected before exiting
