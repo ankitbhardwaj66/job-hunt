@@ -1294,10 +1294,10 @@ Rules:
 - NO greeting like "Hi" or "Hey" — start directly with "I'm Ankit" or "Ankit here"
 - Mention I'm a backend/DevOps engineer with 10+ years of experience
 - Mention I love learning new tech and solving problems
-- Mention I'm open to contract work
+- Mention I'm available for contract work — can help with backlogs or stuck work
 - Optionally mention their company name (short form only)
 - No corporate buzzwords, no emojis
-- End with "Let's connect!" or "Would love to connect!"
+- End with "anyway, let's connect!" or similar casual close
 - Just output the message, nothing else"""
 
         response = client.messages.create(
@@ -1325,11 +1325,11 @@ def _generate_message_fallback(person, local_mode=False, location=""):
 
     target_type = person.get("target_type", "decision_maker")
     if target_type == "senior_engineer":
-        msg = f"I'm Ankit, backend/DevOps engineer with 10+ yrs exp. If you're working on something interesting and need an extra hand on a contractual basis — I'm available. Let's connect!"
+        msg = f"I'm Ankit, backend/DevOps engineer with 10+ yrs exp. If you're working on something interesting or have stuck work, happy to help on contract. Anyway, let's connect!"
     elif local_mode and location:
-        msg = f"I'm Ankit, backend/DevOps engineer with 10+ yrs exp. Love solving problems and learning new tech. Based in {location}, open to contract work. Would love to connect!"
+        msg = f"I'm Ankit, backend/DevOps engineer with 10+ yrs exp. If you have any backlogs or stuck work, happy to help on a contract basis. Based in {location}. Anyway, let's connect!"
     else:
-        msg = f"I'm Ankit, backend/DevOps engineer with 10+ yrs exp. Love learning new tech and solving problems. Saw {company} — open to contract work. Let's connect!"
+        msg = f"I'm Ankit, backend/DevOps engineer with 10+ yrs exp. If there's any backlog or stuck work at {company}, happy to help on contract. Anyway, let's connect!"
 
     if len(msg) > 300:
         msg = msg[:297] + "..."
