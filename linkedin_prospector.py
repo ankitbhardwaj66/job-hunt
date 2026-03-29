@@ -676,6 +676,21 @@ def check_profile_activity(page, person, config, local_mode=False):
                     .split(' ')
                     .filter(w => w.length > 3);  // skip short words like "pvt", "ltd", "the"
 
+                // Helper: reject lines that are clearly not job titles
+                function looksLikeTitle(line) {
+                    const l = line.toLowerCase().trim();
+                    if (l.length < 2 || l.length > 100) return false;
+                    // Reject date patterns: "jan 2020", "2018 - 2022", "3 mos", "present"
+                    if (/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/.test(l)) return false;
+                    if (/\b\d{4}\b/.test(l)) return false;
+                    if (/\b(present|mos|yrs|yr\b|full.time|part.time|contract|freelance|self.employed)\b/.test(l)) return false;
+                    // Reject pure location lines (city, country patterns)
+                    if (/^[a-z ,.\-]+$/.test(l) && l.includes(',')) return false;
+                    // Reject section headers
+                    if (['experience', 'education', 'skills', 'about'].includes(l)) return false;
+                    return true;
+                }
+
                 for (let i = 1; i < lines.length; i++) {
                     const lineLower = lines[i].toLowerCase();
 
@@ -684,8 +699,15 @@ def check_profile_activity(page, person, config, local_mode=False):
                         companyWords.some(w => lineLower.includes(w));
                     if (!isMatch) continue;
 
-                    // Title is the line immediately above the company line
-                    const title = lines[i - 1].toLowerCase();
+                    // Scan backwards from company line to find a valid title line
+                    let title = null;
+                    for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
+                        if (looksLikeTitle(lines[j])) {
+                            title = lines[j].toLowerCase();
+                            break;
+                        }
+                    }
+                    if (!title) continue;
 
                     // Peek ahead a few lines to check if current and employment type
                     const context = lines.slice(i, Math.min(lines.length, i + 5)).join(' ').toLowerCase();
@@ -780,9 +802,25 @@ def check_profile_activity(page, person, config, local_mode=False):
         profile_slug = person["profile_url"].rstrip("/").split("/")[-1]
         activity_url = f"https://www.linkedin.com/in/{profile_slug}/recent-activity/all/"
         page.goto(activity_url, wait_until="domcontentloaded")
-        time.sleep(3)
-        random_scroll(page)
-        time.sleep(2)
+        time.sleep(5)
+        # Scroll several times to trigger lazy loading of activity feed
+        for _ in range(4):
+            random_scroll(page)
+            time.sleep(1.5)
+        # Wait for actual feed content — skeleton loaders use role="progressbar" or similar
+        # Give it up to 8 more seconds for content to replace skeletons
+        for _ in range(4):
+            has_content = page.evaluate("""
+                () => {
+                    const items = document.querySelectorAll(
+                        '.feed-shared-update-v2, .occludable-update, [data-urn], .artdeco-list__item'
+                    );
+                    return items.length > 0;
+                }
+            """)
+            if has_content:
+                break
+            time.sleep(2)
 
         # Count any activity — 60 days for both global and local
         activity_days = 60
