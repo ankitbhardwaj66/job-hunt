@@ -1463,7 +1463,9 @@ def do_search(playwright, config, auto_connect=False, local_mode=False):
         companies = search_companies(page, config)
 
         # Step 2: Find people at each company
-        for company in companies:
+        total = len(companies)
+        for company_idx, company in enumerate(companies, start=1):
+            print(f"\n── Company {company_idx}/{total}: {company['name']} ──")
             people = find_people_at_company(page, company, config, seen_profiles,
                                             local_mode=local_mode, location=location)
 
