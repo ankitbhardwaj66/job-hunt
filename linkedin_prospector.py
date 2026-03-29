@@ -437,7 +437,7 @@ def find_people_at_company(page, company, config, seen_profiles, local_mode=Fals
         "human resource", "marketing executive", "sales executive",
         "sales rep", "account manager", "account executive",
         "freelancer", "volunteer", "teaching", "teacher",
-        "e-learning", "sme", "academician", "instructor",
+        "e-learning", "sme", "academician", "instructor", "mentor", "coach",
         "consultant", "analyst", "coordinator", "associate",
         "practitioner", "specialist",
         # Mid-level managers that aren't decision makers for hiring
@@ -1134,7 +1134,7 @@ I want to connect with TWO types of people:
 
 TYPE 1 — Decision-maker: someone who can assign or approve contract/freelance developer work.
 Examples: CTO, Engineering Manager, VP Engineering, Head of Engineering, Tech Lead, Solutions Architect, Tech Architect, President, Chief Officer.
-NOT: recruiters, HR, designers, interns, sales, mid-level ops.
+NOT: recruiters, HR, designers, interns, sales, mid-level ops, mentors, coaches, trainers, educators, teachers.
 
 TYPE 2 — Senior backend/DevOps engineer with 8+ years of total experience.
 These are peers who may be working on personal projects or have side opportunities.
