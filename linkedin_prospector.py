@@ -35,6 +35,7 @@ CONFIG_PATH = SCRIPT_DIR / "config.json"
 SESSION_DIR = SCRIPT_DIR / ".linkedin_session"
 DEBUG_DIR = SCRIPT_DIR / "debug"
 PROSPECTS_SEEN_FILE = SCRIPT_DIR / ".seen_profiles.json"
+INDUSTRY_STATE_FILE = SCRIPT_DIR / ".industry_state.json"
 
 
 def load_config():
@@ -237,8 +238,30 @@ def search_companies(page, config):
     size_codes = config.get("company_size_codes", ["C"])
     geo_id = config.get("_geo_id", "")
 
-    # Build faceted search URL — e.g. industryCompanyVertical=["96","4"] & companySize=["C"]
-    industry_param = quote(json.dumps(industry_codes, separators=(",", ":")))
+    # Pick one industry per run, rotating through the list
+    if INDUSTRY_STATE_FILE.exists():
+        with open(INDUSTRY_STATE_FILE) as f:
+            state = json.load(f)
+        current_index = state.get("last_index", 0)
+    else:
+        current_index = 0
+    current_index = current_index % len(industry_codes)
+    next_index = (current_index + 1) % len(industry_codes)
+    current_industry = industry_codes[current_index]
+    with open(INDUSTRY_STATE_FILE, "w") as f:
+        json.dump({"last_index": next_index}, f)
+
+    industry_names = {
+        "96": "IT Services & Consulting", "4": "Software Development",
+        "6": "Tech, Info & Internet", "3": "Tech, Info & Media",
+        "48": "Computer & Network Security", "5": "Computer Networking",
+        "2458": "Data Infrastructure & Analytics",
+    }
+    industry_label = industry_names.get(current_industry, f"industry {current_industry}")
+    next_label = industry_names.get(industry_codes[next_index], f"industry {industry_codes[next_index]}")
+
+    # Build faceted search URL with just the current industry
+    industry_param = quote(json.dumps([current_industry], separators=(",", ":")))
     size_param = quote(json.dumps(size_codes, separators=(",", ":")))
     base_url = (
         f"https://www.linkedin.com/search/results/companies/"
@@ -250,7 +273,8 @@ def search_companies(page, config):
         geo_param = quote(json.dumps([geo_id], separators=(",", ":")))
         base_url += f"&companyHqGeo={geo_param}"
 
-    print(f"\nSearching companies (industries: {industry_codes}, size: {size_codes})")
+    print(f"\nSearching industry: {industry_label} (code {current_industry}) [{current_index + 1}/{len(industry_codes)}]")
+    print(f"Next run will search: {next_label}")
 
     # Paginate through results (up to 10 pages = ~100 companies)
     for page_num in range(1, 11):
