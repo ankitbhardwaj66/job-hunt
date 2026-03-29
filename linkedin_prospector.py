@@ -453,7 +453,7 @@ def find_people_at_company(page, company, config, seen_profiles, local_mode=Fals
     print(f"\n  Looking for decision-makers at {company['name']}...")
 
     # Visit the company's people page with keyword filter to pre-filter decision-makers
-    dm_keywords = "manager, cto, vp, head, president, chief"
+    dm_keywords = "manager, cto, vp, head, president, chief, architect"
     people_url = f"https://www.linkedin.com/company/{company['slug']}/people/?keywords={quote(dm_keywords)}"
 
     try:
@@ -1064,7 +1064,7 @@ Title: {title}
 Company: {company}
 LinkedIn headline: {headline}
 
-I'm looking for: CTOs, founders, engineering managers, heads of engineering, VPs, directors, CEOs, or anyone else with authority to hire contract developers.
+I'm looking for: CTOs, founders, engineering managers, heads of engineering, VPs, directors, CEOs, tech architects, solutions architects, or anyone else with authority to hire contract developers.
 I do NOT want: individual contributors, developers, designers, recruiters, interns, students, or mid-level non-hiring roles.
 
 Reply with exactly two lines:
