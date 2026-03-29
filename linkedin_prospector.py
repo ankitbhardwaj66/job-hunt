@@ -948,18 +948,9 @@ def _generate_message_ai(person, local_mode=False, location=""):
 - Do NOT say we're in the same city or 'fellow {location} person' — they're not local
 - Just mention I'm a remote engineer open to contract work"""
 
-        # Randomly rotate which backend skill to highlight
-        backend_highlights = [
-            "backend, REST APIs, Python",
-            "backend, DevOps, AWS, Kubernetes",
-            "backend APIs (Python), DevOps, AWS",
-            "backend (Python/REST APIs), K8s, AWS",
-        ]
-        my_skills = random.choice(backend_highlights)
-
         prompt = f"""Write a LinkedIn connection request note. MUST be under 300 characters total.
 
-About me: Ankit, software engineer ({my_skills}), work from home, open to contract work.
+About me: Ankit, backend/DevOps engineer, 10+ years of experience, love learning new tech and solving problems, open to contract work.
 
 About them:
 - Name: {first_name}
@@ -969,21 +960,18 @@ About them:
 {local_context}
 
 IMPORTANT: Check if their headline matches the company I found them at.
-- If their headline mentions a DIFFERENT company or project (e.g. headline says "Building Bolo Buddy" but company is "Brain Point"), they probably moved on. Reference what's in their HEADLINE instead, not the old company.
-- If the headline matches the company OR the headline is just a generic tagline/motto (e.g. "Convert Ideas Into Reality"), ALWAYS mention the company name in the message. Use the short/common name only, not full legal name or taglines.
-- When in doubt, mention the company name. Only skip it if the headline clearly references a different company.
+- If their headline mentions a DIFFERENT company or project, reference the headline company instead.
+- Otherwise mention the company short name.
 
 Rules:
-- MUST be under 300 characters (this is a hard LinkedIn limit)
-- Start with "Hey {first_name}"
-- ALWAYS try to mention their company name (short form) in the message
-- Sound like a real person texting, not a recruiter or bot
-- Keep it casual and friendly
-- Don't use corporate words like "synergy", "leverage", "opportunity"
-- Don't just repeat their tagline/motto back to them
-- Don't mention my website
-- Do NOT use any emojis
-- End with something like "Would love to connect!" or "Let's connect!"
+- MUST be under 300 characters (hard LinkedIn limit)
+- NO greeting like "Hi" or "Hey" — start directly with "I'm Ankit" or "Ankit here"
+- Mention I'm a backend/DevOps engineer with 10+ years of experience
+- Mention I love learning new tech and solving problems
+- Mention I'm open to contract work
+- Optionally mention their company name (short form only)
+- No corporate buzzwords, no emojis
+- End with "Let's connect!" or "Would love to connect!"
 - Just output the message, nothing else"""
 
         response = client.messages.create(
@@ -1005,15 +993,14 @@ Rules:
 
 def _generate_message_fallback(person, local_mode=False, location=""):
     """Fallback template-based message if AI is unavailable."""
-    first_name = _clean_first_name(person["name"])
     company = person["company"].split(" - ")[0].split(" | ")[0].strip()
-    if len(company) > 30:
-        company = company[:27] + "..."
+    if len(company) > 25:
+        company = company[:22] + "..."
 
     if local_mode and location:
-        msg = f"Hey {first_name}! Fellow {location} person here. Saw {company} and liked what you're doing. I'm a software engineer, WFH, open for contract work. Would love to connect locally!"
+        msg = f"I'm Ankit, backend/DevOps engineer with 10+ yrs exp. Love solving problems and learning new tech. Based in {location}, open to contract work. Would love to connect!"
     else:
-        msg = f"Hey {first_name}! Came across {company} and liked what you guys are up to. I'm a dev who works with small teams — backend, cloud, DevOps. Would love to connect!"
+        msg = f"I'm Ankit, backend/DevOps engineer with 10+ yrs exp. Love learning new tech and solving problems. Saw {company} — open to contract work. Let's connect!"
 
     if len(msg) > 300:
         msg = msg[:297] + "..."
