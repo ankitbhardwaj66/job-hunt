@@ -478,45 +478,31 @@ def find_people_at_company(page, company, config, seen_profiles, local_mode=Fals
             if not headline_lower:
                 continue
 
-            # Check if they have a decision-maker role
-            matched_role = None
-            for role in target_roles + role_patterns:
-                if role in headline_lower:
-                    matched_role = role
-                    break
-
-            if not matched_role:
-                continue
-
-            # If they ONLY have excluded roles (developer, engineer, etc.)
-            # and no decision-maker title, skip them.
-            # But if they're e.g. "DevOps Engineer | Founder" — keep them.
+            # Exclude obvious non-targets by headline — saves unnecessary profile visits.
+            # People whose headline is clearly just an IC / student / non-decision-maker.
             has_exclude = any(ex in headline_lower for ex in exclude_patterns)
             if has_exclude:
-                # Check if their decision-maker role is a strong one (founder, C-level, VP, head)
+                # Allow through if headline also has a strong decision-maker signal
                 strong_roles = ["founder", "co-founder", "ceo", "cto", "coo", "cmo", "cpo",
                                 "chief", "head of", "vp ", "vice president", "managing director"]
-                has_strong_role = any(sr in headline_lower for sr in strong_roles)
-                if not has_strong_role:
+                if not any(sr in headline_lower for sr in strong_roles):
                     continue
 
-            headline = full_headline
-
+            # Don't filter by headline role — actual title comes from Experience section (checked in check_profile_activity)
             person = {
                 "name": name,
-                "headline": headline,
+                "headline": full_headline,
                 "profile_url": profile_url,
                 "company": company["name"],
                 "company_url": company["url"],
-                "matched_role": matched_role,
-                "likely_active": len(headline) > 10,
+                "matched_role": "",  # filled in by check_profile_activity via Experience section
+                "likely_active": True,
                 "found_date": datetime.now().strftime("%Y-%m-%d"),
             }
-            person["message"] = generate_message(person, local_mode=local_mode, location=location)
             person["local"] = "yes" if local_mode else "no"
             people.append(person)
             seen_profiles.add(profile_url)
-            print(f"    + {name} — {headline}")
+            print(f"    ? {name} — {full_headline} (will check experience)")
 
         action_delay(config)
 
@@ -605,6 +591,73 @@ def check_profile_activity(page, person, config, local_mode=False):
         """)
         if is_job_seeker:
             print(f"    [skip] {person['name']} — has 'Open to work' badge, job seeker")
+            person["has_recent_activity"] = False
+            return person
+
+        # Extract current role from Experience section — more reliable than headline
+        exp_titles = page.evaluate("""
+            () => {
+                const titles = [];
+                // Find the Experience section by its h2 heading
+                const allH2 = document.querySelectorAll('h2');
+                let expSection = null;
+                for (const h2 of allH2) {
+                    if (h2.innerText.trim().toLowerCase() === 'experience') {
+                        expSection = h2.closest('section') || h2.parentElement?.parentElement;
+                        break;
+                    }
+                }
+                if (expSection) {
+                    // Each job entry's title/company are in span[aria-hidden="true"] inside list items.
+                    // We only care about the FIRST entry (most recent / current role).
+                    const firstItem = expSection.querySelector('li');
+                    if (firstItem) {
+                        const spans = firstItem.querySelectorAll('span[aria-hidden="true"]');
+                        for (const s of spans) {
+                            const t = s.innerText.trim();
+                            if (t && t.length > 1 && t.length < 100) titles.push(t.toLowerCase());
+                        }
+                    }
+                    // Also grab a few items from the broader list in case of multi-role entries
+                    const allItems = expSection.querySelectorAll('li');
+                    for (let i = 1; i < Math.min(allItems.length, 3); i++) {
+                        const spans = allItems[i].querySelectorAll('span[aria-hidden="true"]');
+                        for (const s of spans) {
+                            const t = s.innerText.trim();
+                            if (t && t.length > 1 && t.length < 100) titles.push(t.toLowerCase());
+                        }
+                    }
+                }
+                return titles;
+            }
+        """)
+
+        role_patterns_check = [
+            "cto", "chief technology", "chief technical",
+            "engineering manager", "tech lead", "technical lead",
+            "head of engineering", "head of technology", "head of product",
+            "vp of engineering", "vp of technology", "vp engineering",
+            "director of engineering", "director of technology",
+            "chief operating officer", "coo", "cmo", "cpo",
+            "chief product", "chief marketing",
+            "vp of", "vp ", "vice president", "managing director",
+            "ceo", "chief executive",
+            "founder", "co-founder",
+        ]
+        matched_from_exp = None
+        for title_text in exp_titles:
+            for role in role_patterns_check:
+                if role in title_text:
+                    matched_from_exp = role
+                    break
+            if matched_from_exp:
+                break
+
+        if matched_from_exp:
+            person["matched_role"] = matched_from_exp
+            print(f"    [exp] {person['name']} — role in experience: '{matched_from_exp}'")
+        else:
+            print(f"    [skip] {person['name']} — no decision-maker role in experience section (titles seen: {exp_titles[:5]})")
             person["has_recent_activity"] = False
             return person
 
