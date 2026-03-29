@@ -1267,11 +1267,11 @@ Their headline: {headline}
 
 Rules:
 - MUST be under 300 characters (hard LinkedIn limit)
-- NO greeting like "Hi" or "Hey" — start with "I'm Ankit" or "Ankit here"
+- Start with "{first_name}, you seem to be doing interesting work at [short company name]"
 - Peer-to-peer tone — we're both senior engineers
-- Say I'm available if they're working on something interesting on a contractual basis
-- No corporate buzzwords, no emojis
-- End with "Let's connect!" or "Would love to connect!"
+- Say I'm Ankit, backend/DevOps engineer, happy to help with backlogs or short-term contract work
+- End with "let's connect anyway!" or "anyway, let's connect!"
+- No "Hi" or "Hey", no emojis, no corporate buzzwords
 - Just output the message, nothing else"""
         else:
             prompt = f"""Write a LinkedIn connection request note. MUST be under 300 characters total.
@@ -1291,13 +1291,10 @@ IMPORTANT: Check if their headline matches the company I found them at.
 
 Rules:
 - MUST be under 300 characters (hard LinkedIn limit)
-- NO greeting like "Hi" or "Hey" — start directly with "I'm Ankit" or "Ankit here"
-- Mention I'm a backend/DevOps engineer with 10+ years of experience
-- Mention I love learning new tech and solving problems
-- Mention I'm available for contract work — can help with backlogs or stuck work
-- Optionally mention their company name (short form only)
-- No corporate buzzwords, no emojis
-- End with "anyway, let's connect!" or similar casual close
+- Start with "{first_name}, you seem to be doing interesting work at [short company name]"
+- Then: "I'm Ankit, backend/DevOps engineer — happy to help with any backlogs or short-term contract work"
+- End with "let's connect anyway!" or "anyway, let's connect!"
+- No "Hi" or "Hey", no emojis, no corporate buzzwords
 - Just output the message, nothing else"""
 
         response = client.messages.create(
@@ -1323,13 +1320,14 @@ def _generate_message_fallback(person, local_mode=False, location=""):
     if len(company) > 25:
         company = company[:22] + "..."
 
+    first_name = _clean_first_name(person.get("name", ""))
     target_type = person.get("target_type", "decision_maker")
     if target_type == "senior_engineer":
-        msg = f"I'm Ankit, backend/DevOps engineer with 10+ yrs exp. If you're working on something interesting or have stuck work, happy to help on contract. Anyway, let's connect!"
+        msg = f"{first_name}, you seem to be doing interesting work at {company}. I'm Ankit, backend/DevOps engineer — happy to help with backlogs or short-term contract work. Anyway, let's connect!"
     elif local_mode and location:
-        msg = f"I'm Ankit, backend/DevOps engineer with 10+ yrs exp. If you have any backlogs or stuck work, happy to help on a contract basis. Based in {location}. Anyway, let's connect!"
+        msg = f"{first_name}, you seem to be doing interesting work at {company}. I'm Ankit, backend/DevOps engineer based in {location} — happy to help with any contract work. Anyway, let's connect!"
     else:
-        msg = f"I'm Ankit, backend/DevOps engineer with 10+ yrs exp. If there's any backlog or stuck work at {company}, happy to help on contract. Anyway, let's connect!"
+        msg = f"{first_name}, you seem to be doing interesting work at {company}. I'm Ankit, backend/DevOps engineer — happy to help with backlogs or short-term contract work. Anyway, let's connect!"
 
     if len(msg) > 300:
         msg = msg[:297] + "..."
