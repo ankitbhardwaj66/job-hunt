@@ -696,11 +696,12 @@ def check_profile_activity(page, person, config, local_mode=False):
                     // Title is the line immediately above the company line
                     const title = lines[i - 1].toLowerCase();
 
-                    // Peek ahead a few lines to check if this is a current role
-                    const context = lines.slice(i, Math.min(lines.length, i + 4)).join(' ').toLowerCase();
+                    // Peek ahead a few lines to check if current and employment type
+                    const context = lines.slice(i, Math.min(lines.length, i + 5)).join(' ').toLowerCase();
                     const isCurrent = context.includes('present');
+                    const isFreelance = context.includes('freelance') || context.includes('contract') || context.includes('self-employed');
 
-                    return { title, isCurrent, companyLine: lines[i], expText: expText };
+                    return { title, isCurrent, isFreelance, companyLine: lines[i], expText: expText };
                 }
 
                 return { title: null, isCurrent: false, companyLine: null, expText: expText };
@@ -728,10 +729,25 @@ def check_profile_activity(page, person, config, local_mode=False):
 
         # Determine the title to evaluate — prefer experience section, fall back to headline
         if title_at_company and title_at_company.get("title"):
-            check_title = title_at_company["title"]
             is_current = title_at_company.get("isCurrent", False)
+            is_freelance = title_at_company.get("isFreelance", False)
             company_line = title_at_company.get("companyLine", "")
-            src_label = "exp (current)" if is_current else "exp (past)"
+
+            # Skip freelancers — they can't assign contract work
+            if is_freelance:
+                print(f"    [skip] {person['name']} — freelance/contract role at {company_name}, not a decision-maker")
+                person["has_recent_activity"] = False
+                return person
+
+            # Only use the title if it's their CURRENT role — past titles are irrelevant
+            if is_current:
+                check_title = title_at_company["title"]
+                src_label = "exp (current)"
+            else:
+                # Past role found — fall back to headline instead
+                check_title = headline
+                company_line = company_name
+                src_label = "headline (exp was past role)"
         else:
             check_title = headline
             company_line = company_name
