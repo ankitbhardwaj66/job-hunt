@@ -506,56 +506,63 @@ def find_people_at_company(page, company, config, seen_profiles, local_mode=Fals
         raw_people = extract_people_from_page(page)
         print(f"    Extracted {len(raw_people)} people entries from page")
 
+        # Build candidate list — apply exclude filter, collect name + headline
+        candidates = []
         for entry in raw_people:
-
             href = entry.get("href", "")
             match = re.search(r'/in/([^/?]+)', href)
             if not match:
                 continue
             profile_url = f"https://www.linkedin.com/in/{match.group(1)}"
-
             if profile_url in seen_profiles:
                 continue
 
             lines = entry.get("lines", [])
-            text = entry.get("text", "").lower()
-
-            # First non-empty line is usually the name
             name = lines[0] if lines else "Unknown"
-
-            # Combine all text lines into one headline for matching
-            # LinkedIn headlines are often split across multiple lines
             full_headline = " | ".join(lines[1:6]) if len(lines) > 1 else ""
             headline_lower = full_headline.lower()
 
             if not headline_lower:
                 continue
 
-            # Exclude obvious non-targets by headline — saves unnecessary profile visits.
-            # People whose headline is clearly just an IC / student / non-decision-maker.
+            # Exclude obvious non-targets by headline
             has_exclude = any(ex in headline_lower for ex in exclude_patterns)
             if has_exclude:
-                # Allow through if headline also has a strong decision-maker signal
                 strong_roles = ["founder", "co-founder", "ceo", "cto", "coo", "cmo", "cpo",
                                 "chief", "head of", "vp ", "vice president", "managing director"]
                 if not any(sr in headline_lower for sr in strong_roles):
                     continue
 
-            # Don't filter by headline role — actual title comes from Experience section (checked in check_profile_activity)
-            person = {
+            candidates.append({
                 "name": name,
                 "headline": full_headline,
                 "profile_url": profile_url,
+            })
+
+        print(f"    {len(candidates)} candidates after exclude filter")
+
+        # If more than 10, ask AI to pick the best 10 to visit
+        if len(candidates) > 10:
+            print(f"    Asking AI to pick best 10 from {len(candidates)} candidates...")
+            selected_indices = _pick_best_people_ai(candidates, company["name"])
+            candidates = [c for i, c in enumerate(candidates) if i in selected_indices]
+            print(f"    AI selected {len(candidates)} candidates to check")
+
+        for candidate in candidates:
+            person = {
+                "name": candidate["name"],
+                "headline": candidate["headline"],
+                "profile_url": candidate["profile_url"],
                 "company": company["name"],
                 "company_url": company["url"],
-                "matched_role": "",  # filled in by check_profile_activity via Experience section
+                "matched_role": "",  # filled in by check_profile_activity
                 "likely_active": True,
                 "found_date": datetime.now().strftime("%Y-%m-%d"),
             }
             person["local"] = "yes" if local_mode else "no"
             people.append(person)
-            seen_profiles.add(profile_url)
-            print(f"    ? {name} — {full_headline} (will check experience)")
+            seen_profiles.add(candidate["profile_url"])
+            print(f"    ? {candidate['name']} — {candidate['headline']}")
 
         action_delay(config)
 
@@ -1058,6 +1065,50 @@ _SALUTATIONS = {
     "mr", "mr.", "mrs", "mrs.", "ms", "ms.", "dr", "dr.", "prof", "prof.",
     "sir", "shri", "smt", "ca", "er", "er.", "ca.",
 }
+
+
+def _pick_best_people_ai(candidates, company):
+    """Given a list of {name, headline} dicts, ask AI to pick the best 10 to visit.
+    Returns a set of indices to keep. Falls back to first 10 if API unavailable."""
+    try:
+        import anthropic
+        client = anthropic.Anthropic()
+
+        numbered = "\n".join(
+            f"{i+1}. {c['name']} — {c['headline']}"
+            for i, c in enumerate(candidates)
+        )
+        prompt = f"""I found these people at a company called "{company}". I need to visit their profiles to check their experience and activity, but I can only check 10.
+
+Pick the best 10 people most likely to be either:
+- A decision-maker who can assign contract developer work (CTO, VP Eng, Engineering Manager, Tech Lead, Architect, etc.)
+- A senior backend/DevOps/cloud engineer with likely 8+ years of experience
+
+{numbered}
+
+Reply with just the numbers of your top 10 picks, comma-separated. Example: 1, 3, 5, 7, 8, 9, 11, 14, 17, 20
+Only numbers, nothing else."""
+
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=60,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = response.content[0].text.strip()
+        selected = set()
+        for part in re.split(r'[,\s]+', text):
+            part = part.strip().rstrip('.')
+            if part.isdigit():
+                idx = int(part) - 1
+                if 0 <= idx < len(candidates):
+                    selected.add(idx)
+        if selected:
+            return selected
+    except Exception as e:
+        print(f"    [ai] People selection failed: {e}")
+
+    # Fallback: first 10
+    return set(range(min(10, len(candidates))))
 
 
 def _is_decision_maker_ai(title, company, headline="", exp_text=""):
