@@ -598,41 +598,26 @@ def check_profile_activity(page, person, config, local_mode=False):
             person["has_recent_activity"] = False
             return person
 
-        # Extract current role from Experience section — more reliable than headline
-        exp_titles = page.evaluate("""
+        # Scroll down to trigger lazy-loading of the Experience section
+        for _ in range(3):
+            random_scroll(page)
+            time.sleep(1)
+
+        # Extract Experience section text via page innerText — resilient to DOM changes.
+        # LinkedIn lazy-loads sections, so we parse the full visible text.
+        exp_lines = page.evaluate("""
             () => {
-                const titles = [];
-                // Find the Experience section by its h2 heading
-                const allH2 = document.querySelectorAll('h2');
-                let expSection = null;
-                for (const h2 of allH2) {
-                    if (h2.innerText.trim().toLowerCase() === 'experience') {
-                        expSection = h2.closest('section') || h2.parentElement?.parentElement;
-                        break;
-                    }
-                }
-                if (expSection) {
-                    // Each job entry's title/company are in span[aria-hidden="true"] inside list items.
-                    // We only care about the FIRST entry (most recent / current role).
-                    const firstItem = expSection.querySelector('li');
-                    if (firstItem) {
-                        const spans = firstItem.querySelectorAll('span[aria-hidden="true"]');
-                        for (const s of spans) {
-                            const t = s.innerText.trim();
-                            if (t && t.length > 1 && t.length < 100) titles.push(t.toLowerCase());
-                        }
-                    }
-                    // Also grab a few items from the broader list in case of multi-role entries
-                    const allItems = expSection.querySelectorAll('li');
-                    for (let i = 1; i < Math.min(allItems.length, 3); i++) {
-                        const spans = allItems[i].querySelectorAll('span[aria-hidden="true"]');
-                        for (const s of spans) {
-                            const t = s.innerText.trim();
-                            if (t && t.length > 1 && t.length < 100) titles.push(t.toLowerCase());
-                        }
-                    }
-                }
-                return titles;
+                const fullText = document.body.innerText;
+                // Find the Experience heading and grab text until the next major section
+                const expMatch = fullText.match(
+                    /\\nExperience\\n([\\s\\S]*?)(?:\\n(?:Education|Skills|Certifications|Licenses|Recommendations|Volunteering|Interests|Languages|Publications|Projects|Honors|Courses|Organizations|Test scores)\\n|$)/
+                );
+                if (!expMatch) return [];
+                return expMatch[1]
+                    .split('\\n')
+                    .map(l => l.trim().toLowerCase())
+                    .filter(l => l.length > 1 && l.length < 120)
+                    .slice(0, 40);
             }
         """)
 
@@ -645,23 +630,32 @@ def check_profile_activity(page, person, config, local_mode=False):
             "chief operating officer", "coo", "cmo", "cpo",
             "chief product", "chief marketing",
             "vp of", "vp ", "vice president", "managing director",
+            "president",
             "ceo", "chief executive",
-            "founder", "co-founder",
+            "founder", "co-founder", "founder's office",
         ]
-        matched_from_exp = None
-        for title_text in exp_titles:
-            for role in role_patterns_check:
-                if role in title_text:
-                    matched_from_exp = role
+
+        # Check experience lines first, then fall back to headline (already has role info often)
+        sources = [("exp", exp_lines), ("headline", [person.get("headline", "").lower()])]
+        matched_role = None
+        matched_source = None
+        for source_name, lines in sources:
+            for line in lines:
+                for role in role_patterns_check:
+                    if role in line:
+                        matched_role = role
+                        matched_source = source_name
+                        break
+                if matched_role:
                     break
-            if matched_from_exp:
+            if matched_role:
                 break
 
-        if matched_from_exp:
-            person["matched_role"] = matched_from_exp
-            print(f"    [exp] {person['name']} — role in experience: '{matched_from_exp}'")
+        if matched_role:
+            person["matched_role"] = matched_role
+            print(f"    [{matched_source}] {person['name']} — role: '{matched_role}'")
         else:
-            print(f"    [skip] {person['name']} — no decision-maker role in experience section (titles seen: {exp_titles[:5]})")
+            print(f"    [skip] {person['name']} — no decision-maker role found (exp lines: {exp_lines[:4]})")
             person["has_recent_activity"] = False
             return person
 
