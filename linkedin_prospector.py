@@ -304,6 +304,12 @@ def search_companies(page, config):
                 break  # No more results
             print(f"  Page {page_num}: {len(page_companies)} companies found")
 
+            # AI filter — drop non-tech companies (civil eng, military, NGOs, etc.)
+            all_names = [c["name"] for c in page_companies]
+            tech_names = _filter_tech_companies_ai(all_names)
+            page_companies = [c for c in page_companies if c["name"] in tech_names]
+            print(f"  Page {page_num}: {len(page_companies)} after AI tech filter")
+
             skip_companies_list = [s.lower() for s in config.get("skip_companies", [])]
 
             for comp in page_companies:
@@ -1065,6 +1071,46 @@ _SALUTATIONS = {
     "mr", "mr.", "mrs", "mrs.", "ms", "ms.", "dr", "dr.", "prof", "prof.",
     "sir", "shri", "smt", "ca", "er", "er.", "ca.",
 }
+
+
+def _filter_tech_companies_ai(company_names):
+    """Ask AI which company names look like tech/software companies that might hire
+    a backend/DevOps contractor. Returns a set of names to keep.
+    Falls back to keeping all if API unavailable."""
+    if not company_names:
+        return set(company_names)
+    try:
+        import anthropic
+        client = anthropic.Anthropic()
+        numbered = "\n".join(f"{i+1}. {name}" for i, name in enumerate(company_names))
+        prompt = f"""I'm looking for tech/software companies that might hire a contract backend or DevOps engineer.
+
+Which of these company names are likely tech or software companies?
+Include: software companies, SaaS, IT services, cloud/DevOps firms, AI/ML companies, fintech, cybersecurity, dev tools.
+Exclude: civil engineering, construction, military, associations, NGOs, roofing, concrete, roads, government bodies, media publishers, non-tech trade groups.
+
+{numbered}
+
+Reply with just the numbers of companies to KEEP, comma-separated. Example: 1, 3, 5
+Only numbers, nothing else."""
+
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=100,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = response.content[0].text.strip()
+        keep_indices = set()
+        for part in re.split(r'[,\s]+', text):
+            part = part.strip().rstrip('.')
+            if part.isdigit():
+                idx = int(part) - 1
+                if 0 <= idx < len(company_names):
+                    keep_indices.add(company_names[idx])
+        return keep_indices if keep_indices else set(company_names)
+    except Exception as e:
+        print(f"  [ai] Company filter failed: {e}")
+        return set(company_names)
 
 
 def _pick_best_people_ai(candidates, company):
