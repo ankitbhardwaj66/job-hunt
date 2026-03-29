@@ -300,8 +300,11 @@ def search_companies(page, config):
                     print(f"    [skip] {orig_name} — LinkedIn page, not a company")
                     continue
 
-                if "stealth" in name_lower:
-                    print(f"    [skip] {orig_name} — stealth company")
+                # Stealth / placeholder LinkedIn entries — not real contactable companies
+                placeholder_names = {"stealth", "startup", "a startup", "stealth startup",
+                                     "new startup", "tech startup", "my startup", "our startup"}
+                if "stealth" in name_lower or name_lower.strip() in placeholder_names:
+                    print(f"    [skip] {orig_name} — placeholder/stealth company")
                     continue
 
                 vc_words = {"venture capital", "ventures", "capital", "investment", "angel", "fund", "vc "}
