@@ -506,7 +506,7 @@ def find_people_at_company(page, company, config, seen_profiles, local_mode=Fals
         raw_people = extract_people_from_page(page)
         print(f"    Extracted {len(raw_people)} people entries from page")
 
-        # Build candidate list — apply exclude filter, collect name + headline
+        # Build candidate list from extracted people
         candidates = []
         for entry in raw_people:
             href = entry.get("href", "")
@@ -520,18 +520,9 @@ def find_people_at_company(page, company, config, seen_profiles, local_mode=Fals
             lines = entry.get("lines", [])
             name = lines[0] if lines else "Unknown"
             full_headline = " | ".join(lines[1:6]) if len(lines) > 1 else ""
-            headline_lower = full_headline.lower()
 
-            if not headline_lower:
+            if not full_headline:
                 continue
-
-            # Exclude obvious non-targets by headline
-            has_exclude = any(ex in headline_lower for ex in exclude_patterns)
-            if has_exclude:
-                strong_roles = ["founder", "co-founder", "ceo", "cto", "coo", "cmo", "cpo",
-                                "chief", "head of", "vp ", "vice president", "managing director"]
-                if not any(sr in headline_lower for sr in strong_roles):
-                    continue
 
             candidates.append({
                 "name": name,
@@ -539,7 +530,7 @@ def find_people_at_company(page, company, config, seen_profiles, local_mode=Fals
                 "profile_url": profile_url,
             })
 
-        print(f"    {len(candidates)} candidates after exclude filter")
+        print(f"    {len(candidates)} candidates")
 
         # If more than 10, ask AI to pick the best 10 to visit
         if len(candidates) > 10:

@@ -69,8 +69,7 @@ flowchart TD
         P1[company/people/?keywords=\nmanager · cto · vp · head\npresident · chief · architect · senior]
         P1 --> P2[Click Show more up to 5×]
         P2 --> P3[Extract all visible people]
-        P3 --> P4[Exclude filter\ndevelopers · interns · recruiters\ndesigners · students · mentors]
-        P4 --> P5{More than\n10 candidates?}
+        P3 --> P5{More than\n10 candidates?}
         P5 -->|yes| P6[AI picks best 10\nfrom visible headlines]
         P5 -->|no| P7
         P6 --> P7[Candidate list ready]
