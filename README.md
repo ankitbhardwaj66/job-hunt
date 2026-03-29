@@ -38,60 +38,75 @@ export ANTHROPIC_API_KEY=your_key_here
 
 ```mermaid
 flowchart TD
-    A([Start Run]) --> B
+    A([Start Run]) --> PRE
+
+    subgraph PRE["⓪ Pre-load from Google Sheet"]
+        PA[Load all visited company slugs]
+        PA --> PB[Load all contacted profile URLs]
+    end
+
+    PRE --> S1
 
     subgraph SEARCH["① Company Search"]
-        B[Pick current industry\nfrom industry_codes list\nsave next index → .industry_state.json]
-        B --> C[Build faceted LinkedIn URL\ncompanySize=C 11-50\nindustryCompanyVertical=current industry]
-        C --> D[Paginate up to 10 pages]
-        D --> E{Company on page?}
-        E -->|yes| F{Pass filters?\nstealth · VC · recruiter\ncountry name · placeholder}
-        F -->|pass| G[Add to companies list]
-        F -->|fail| E
-        G --> H{max_companies\nreached?}
-        H -->|no| E
-        H -->|yes| I
-        E -->|no more pages| I
+        S1[Pick current industry · save next index\nto .industry_state.json]
+        S1 --> S2[Build faceted URL\ncompanySize=C · industryCompanyVertical=X]
+        S2 --> S3[Paginate up to 10 pages]
+        S3 --> S4{Company found?}
+        S4 -->|yes| S5{Already in\nGoogle Sheet?}
+        S5 -->|yes · skip| S4
+        S5 -->|no| S6{Pass name filters?\nstealth · VC · recruiter\ncountry · placeholder}
+        S6 -->|fail| S4
+        S6 -->|pass| S7[Add to list]
+        S7 --> S8{max_companies\nreached?}
+        S8 -->|no| S4
+        S8 -->|yes| DONE_SEARCH
+        S4 -->|no more| DONE_SEARCH
     end
 
-    I([For each company]) --> J
+    DONE_SEARCH([For each company]) --> P1
 
     subgraph PEOPLE["② Find People"]
-        J[Go to company/people/\n?keywords=manager,cto,vp,\nhead,president,chief,architect,senior]
-        J --> K[Click Show more results\nup to 5×]
-        K --> L[Extract all visible people]
-        L --> M[Apply exclude filter\ndevelopers · interns · recruiters\ndesigners · students]
-        M --> N{More than\n10 candidates?}
-        N -->|yes| O[AI picks best 10\nbased on visible headlines]
-        N -->|no| P
-        O --> P[Candidate list ready]
+        P1[company/people/?keywords=\nmanager · cto · vp · head\npresident · chief · architect · senior]
+        P1 --> P2[Click Show more up to 5×]
+        P2 --> P3[Extract all visible people]
+        P3 --> P4[Exclude filter\ndevelopers · interns · recruiters\ndesigners · students · mentors]
+        P4 --> P5{More than\n10 candidates?}
+        P5 -->|yes| P6[AI picks best 10\nfrom visible headlines]
+        P5 -->|no| P7
+        P6 --> P7[Candidate list ready]
     end
 
-    P --> Q([For each candidate]) --> R
+    P7 --> EACH([For each candidate]) --> PC1
 
     subgraph PROFILE["③ Profile Check"]
-        R[Visit profile\nGet degree + location]
-        R --> S{Open to Work\nbadge?}
-        S -->|yes| SKIP([Skip])
-        S -->|no| T[Scroll to load\nExperience section]
-        T --> U[Find title at\nTHIS company]
-        U --> V{AI decision}
-        V -->|decision_maker\nCTO · VP · Manager · Architect| W[Continue]
-        V -->|senior_engineer\n8+ yrs backend/DevOps| W
-        V -->|skip| SKIP
-        W --> X[Check activity\n2+ posts/comments in 60 days]
-        X -->|inactive| SAVE
-        X -->|active| Y[Generate message\ndifferent for each target type]
+        PC1[Visit profile · get degree + location]
+        PC1 --> PC2{Profile URL already\nin Google Sheet?}
+        PC2 -->|yes| SKIP([Skip])
+        PC2 -->|no| PC3{Open to Work\nbadge?}
+        PC3 -->|yes| SKIP
+        PC3 -->|no| PC4[Scroll · load Experience section\nfind title at THIS company]
+        PC4 --> PC5{Freelance\nor past role?}
+        PC5 -->|freelance| SKIP
+        PC5 -->|past role| PC6[Fall back to headline]
+        PC5 -->|current| PC7[Use experience title]
+        PC6 --> PC8
+        PC7 --> PC8{AI: what type?}
+        PC8 -->|decision_maker\nCTO·VP·Manager·Architect| PC9[Continue]
+        PC8 -->|senior_engineer\n8+ yrs backend/DevOps| PC9
+        PC8 -->|skip| SKIP
+        PC9 --> PC10{2+ activities\nin last 60 days?}
+        PC10 -->|no| SAVE
+        PC10 -->|yes| PC11[Generate message\ndecision_maker or senior_engineer style]
     end
 
-    Y --> Z
+    PC11 --> CN1
 
     subgraph CONNECT["④ Connect"]
-        Z{auto-connect\n& under limit?}
-        Z -->|no| SAVE
-        Z -->|yes| AA[Navigate to profile\nFind Connect button]
-        AA --> AB[Add personalized note\nunder 300 chars]
-        AB --> SAVE
+        CN1{auto-connect\n& under limit?}
+        CN1 -->|no| SAVE
+        CN1 -->|yes| CN2[Find Connect button by name]
+        CN2 --> CN3[Add note · send]
+        CN3 --> SAVE
     end
 
     SAVE([Save to Google Sheet])
