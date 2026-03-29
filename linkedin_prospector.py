@@ -228,189 +228,127 @@ def _load_existing_from_sheet(config):
 
 
 def search_companies(page, config):
-    """Search LinkedIn for small tech companies and return company info."""
+    """Search LinkedIn for small tech companies using faceted filters (no keyword search)."""
     companies = []
     seen_companies = config.get("_existing_slugs", set())
     max_companies = config["max_companies_per_run"]
-    keywords = config["search_keywords"]
-    geo_id = config.get("_geo_id", "")  # set by do_search for local mode
 
-    random.shuffle(keywords)
+    industry_codes = config.get("industry_codes", ["96", "4"])
+    size_codes = config.get("company_size_codes", ["C"])
+    geo_id = config.get("_geo_id", "")
 
-    for keyword in keywords:
+    # Build faceted search URL — e.g. industryCompanyVertical=["96","4"] & companySize=["C"]
+    industry_param = quote(json.dumps(industry_codes, separators=(",", ":")))
+    size_param = quote(json.dumps(size_codes, separators=(",", ":")))
+    base_url = (
+        f"https://www.linkedin.com/search/results/companies/"
+        f"?origin=FACETED_SEARCH"
+        f"&companySize={size_param}"
+        f"&industryCompanyVertical={industry_param}"
+    )
+    if geo_id:
+        geo_param = quote(json.dumps([geo_id], separators=(",", ":")))
+        base_url += f"&companyHqGeo={geo_param}"
+
+    print(f"\nSearching companies (industries: {industry_codes}, size: {size_codes})")
+
+    # Paginate through results (up to 10 pages = ~100 companies)
+    for page_num in range(1, 11):
         if len(companies) >= max_companies:
             break
 
-        print(f"\nSearching for: {keyword}")
+        url = base_url if page_num == 1 else f"{base_url}&page={page_num}"
 
-        for size_code in ["C"]:  # C = 11-50 employees
-            if len(companies) >= max_companies:
-                break
+        try:
+            page.goto(url, wait_until="domcontentloaded")
+            time.sleep(3)
+            random_scroll(page)
+            time.sleep(2)
+            random_scroll(page)
+            time.sleep(1)
 
-            base_url = f"https://www.linkedin.com/search/results/companies/?keywords={quote(keyword)}&companySize=%5B%22{size_code}%22%5D"
-            if geo_id:
-                base_url += f"&companyHqGeo=%5B%22{geo_id}%22%5D"
+            try:
+                page.wait_for_selector('a[href*="/company/"]', timeout=8000)
+            except PlaywrightTimeout:
+                if page_num == 1:
+                    print("  No company links found — check industry/size codes or session")
+                    debug_snapshot(page, "no_results_faceted")
+                break  # No more pages
 
-            # Paginate through search results (up to 3 pages)
-            for page_num in range(1, 4):
+            page_companies = extract_companies_from_page(page)
+            if not page_companies:
+                break  # No more results
+            print(f"  Page {page_num}: {len(page_companies)} companies found")
+
+            skip_companies_list = [s.lower() for s in config.get("skip_companies", [])]
+
+            for comp in page_companies:
                 if len(companies) >= max_companies:
                     break
+                if comp["slug"] in seen_companies:
+                    print(f"    [skip] {comp['name']} — already prospected")
+                    continue
 
-                url = base_url if page_num == 1 else f"{base_url}&page={page_num}"
+                orig_name = comp["name"].strip()
+                name_lower = orig_name.lower()
 
-                try:
-                    page.goto(url, wait_until="domcontentloaded")
-                    time.sleep(3)
-                    random_scroll(page)
-                    time.sleep(2)
-                    random_scroll(page)
-                    time.sleep(1)
+                if any(sc in name_lower for sc in skip_companies_list):
+                    print(f"    [skip] {orig_name} — in skip list")
+                    continue
 
-                    try:
-                        page.wait_for_selector('a[href*="/company/"]', timeout=8000)
-                    except PlaywrightTimeout:
-                        if page_num == 1:
-                            print(f"  No company links found for '{keyword}' (size {size_code})")
-                            debug_snapshot(page, f"no_results_{keyword.replace(' ', '_')}_{size_code}")
-                        break  # No more pages
+                if name_lower.startswith("page by"):
+                    print(f"    [skip] {orig_name} — LinkedIn page, not a company")
+                    continue
 
-                    page_companies = extract_companies_from_page(page)
-                    if not page_companies:
-                        break  # No more results
-                    print(f"  Extracted {len(page_companies)} companies from page {page_num}")
+                if "stealth mode" in name_lower:
+                    print(f"    [skip] {orig_name} — stealth mode company")
+                    continue
 
-                    # Build skip words from all search keywords + generic filler words
-                    skip_words = set()
-                    for kw in keywords:
-                        skip_words.add(kw.lower())
-                        for word in kw.lower().split():
-                            skip_words.add(word)
-                    filler_words = {
-                        "and", "the", "of", "a", "an", "in", "for", "by", "page",
-                        "first", "best", "top", "leading", "new", "next", "gen",
-                        "inc", "ltd", "llc", "pvt", "co", "corp", "group", "global",
-                        "solutions", "services", "enterprise", "initiative", "leaders",
-                        "markets", "search", "confidential", "stealth",
-                        "school", "academy", "lab", "labs", "hub", "network",
-                        "community", "club", "institute", "center", "centre",
-                        "factory", "incubator", "accelerator", "collective",
-                        "platform", "digital", "online", "pro", "plus",
-                        "studio", "forum", "mixer", "show", "expo",
-                        "exchange", "program", "programme", "free", "code",
-                        "india", "usa", "uk", "us", "china", "japan", "korea",
-                        "vietnam", "singapore", "indonesia", "malaysia", "thailand",
-                        "philippines", "pakistan", "bangladesh", "nepal", "sri lanka",
-                        "germany", "france", "spain", "italy", "netherlands", "sweden",
-                        "norway", "denmark", "finland", "poland", "switzerland",
-                        "australia", "canada", "brazil", "mexico", "argentina",
-                        "nigeria", "kenya", "south africa", "egypt", "uae", "dubai",
-                        "israel", "turkey", "russia", "ukraine", "ireland",
-                        "europe", "asia", "africa", "mena", "latam", "apac",
-                        "london", "berlin", "paris", "mumbai", "delhi", "bangalore",
-                        "bengaluru", "hyderabad", "chennai", "pune", "kolkata",
-                        "new york", "san francisco", "seattle", "austin", "boston",
-                        "toronto", "sydney", "melbourne", "tokyo", "seoul",
-                        "shanghai", "beijing", "hong kong", "hanoi", "jakarta",
-                        "dubai", "tel aviv", "amsterdam", "stockholm", "lisbon",
-                    }
-                    _location_phrases = {
-                        "sri lanka", "south africa", "new york", "san francisco",
-                        "hong kong", "tel aviv", "new zealand",
-                    }
+                vc_words = {"venture capital", "ventures", "capital", "investment", "angel", "fund", "vc "}
+                if any(v in name_lower for v in vc_words):
+                    print(f"    [skip] {orig_name} — VC/investment firm")
+                    continue
 
-                    for comp in page_companies:
-                        if len(companies) >= max_companies:
-                            break
-                        if comp["slug"] in seen_companies:
-                            print(f"    [skip] {comp['name']} — already prospected")
-                            continue
+                country_names = {
+                    "usa", "india", "uk", "china", "japan", "korea", "vietnam",
+                    "singapore", "indonesia", "malaysia", "thailand", "philippines",
+                    "pakistan", "bangladesh", "nepal", "germany", "france", "spain",
+                    "italy", "netherlands", "sweden", "norway", "denmark", "finland",
+                    "poland", "switzerland", "australia", "canada", "brazil", "mexico",
+                    "argentina", "nigeria", "kenya", "south africa", "egypt", "uae",
+                    "dubai", "israel", "turkey", "russia", "ukraine", "ireland",
+                }
+                name_words_lower = set(name_lower.replace("-", " ").replace(".", " ").split())
+                if name_words_lower & country_names:
+                    print(f"    [skip] {orig_name} — contains country name")
+                    continue
 
-                        orig_name = comp["name"].strip()
-                        name_lower = orig_name.lower()
+                disqualifying_types = {
+                    "incubator", "accelerator", "academy", "school",
+                    "bootcamp", "boot camp", "university", "college",
+                    "institute", "forum", "mixer", "show", "expo",
+                    "conference", "summit", "meetup", "podcast",
+                }
+                if any(dt in name_lower for dt in disqualifying_types):
+                    print(f"    [skip] {orig_name} — org type not a target company")
+                    continue
 
-                        skip_companies_list = [s.lower() for s in config.get("skip_companies", [])]
-                        if any(sc in name_lower for sc in skip_companies_list):
-                            print(f"    [skip] {orig_name} — in skip list")
-                            continue
+                seen_companies.add(comp["slug"])
+                companies.append({
+                    "name": comp["name"],
+                    "slug": comp["slug"],
+                    "url": f"https://www.linkedin.com/company/{comp['slug']}/",
+                })
+                print(f"    + {comp['name']}")
 
-                        if name_lower.startswith("page by"):
-                            print(f"    [skip] {orig_name} — LinkedIn page, not a company")
-                            continue
+            action_delay(config)
 
-                        if "stealth mode" in name_lower:
-                            print(f"    [skip] {orig_name} — stealth mode company")
-                            continue
-
-                        vc_words = {"venture capital", "ventures", "capital", "investment", "angel", "fund", "vc "}
-                        if any(v in name_lower for v in vc_words):
-                            print(f"    [skip] {orig_name} — VC/investment firm")
-                            continue
-
-                        country_names = {
-                            "usa", "india", "uk", "china", "japan", "korea", "vietnam",
-                            "singapore", "indonesia", "malaysia", "thailand", "philippines",
-                            "pakistan", "bangladesh", "nepal", "germany", "france", "spain",
-                            "italy", "netherlands", "sweden", "norway", "denmark", "finland",
-                            "poland", "switzerland", "australia", "canada", "brazil", "mexico",
-                            "argentina", "nigeria", "kenya", "south africa", "egypt", "uae",
-                            "dubai", "israel", "turkey", "russia", "ukraine", "ireland",
-                        }
-                        name_words_lower = set(name_lower.replace("-", " ").replace(".", " ").split())
-                        if name_words_lower & country_names:
-                            print(f"    [skip] {orig_name} — contains country name")
-                            continue
-
-                        disqualifying_types = {
-                            "incubator", "accelerator", "academy", "school",
-                            "bootcamp", "boot camp", "university", "college",
-                            "institute", "forum", "mixer", "show", "expo",
-                            "conference", "summit", "meetup", "podcast",
-                        }
-                        if any(dt in name_lower for dt in disqualifying_types):
-                            print(f"    [skip] {orig_name} — org type not a target company")
-                            continue
-
-                        check_name = name_lower
-                        for phrase in _location_phrases:
-                            check_name = check_name.replace(phrase, " ")
-                        check_name = re.split(r'\s*[-|]\s*', check_name)[0].strip()
-                        name_words = [w for w in check_name.replace(".", " ").split() if w]
-                        meaningful_words = [w for w in name_words if w not in filler_words]
-                        if meaningful_words and all(w in skip_words for w in meaningful_words):
-                            print(f"    [skip] {orig_name} — generic/keyword name")
-                            continue
-
-                        community_words = {
-                            "circle", "connect", "meetup", "event", "events",
-                            "summit", "conference", "podcast", "media",
-                            "magazine", "journal", "newsletter", "blog",
-                            "forum", "mixer", "show", "expo", "fest",
-                            "studio", "exchange", "program", "programme",
-                            "free", "code", "deep", "blue", "make", "it",
-                            "world", "worlds", "world's", "largest", "team", "at",
-                        }
-                        remaining_after_keywords = [w for w in meaningful_words if w not in skip_words]
-                        if remaining_after_keywords and all(w in community_words for w in remaining_after_keywords):
-                            print(f"    [skip] {orig_name} — community/event/edu, not a company")
-                            continue
-
-                        seen_companies.add(comp["slug"])
-                        companies.append({
-                            "name": comp["name"],
-                            "slug": comp["slug"],
-                            "url": f"https://www.linkedin.com/company/{comp['slug']}/",
-                            "keyword": keyword,
-                        })
-                        print(f"    + {comp['name']}")
-
-                    action_delay(config)
-
-                except PlaywrightTimeout:
-                    print(f"  Timeout on page {page_num} for {keyword}, moving on...")
-                    break
-                except Exception as e:
-                    print(f"  Error on page {page_num} for {keyword}: {e}")
-                    break
+        except PlaywrightTimeout:
+            print(f"  Timeout on page {page_num}, stopping pagination...")
+            break
+        except Exception as e:
+            print(f"  Error on page {page_num}: {e}")
+            break
 
     print(f"\nFound {len(companies)} companies total.")
     return companies
@@ -595,7 +533,7 @@ def find_people_at_company(page, company, config, seen_profiles, local_mode=Fals
 
 
 def check_profile_activity(page, person, config, local_mode=False):
-    """Visit profile activity page — check for any 2+ activities in last 30 days (60 for local)."""
+    """Visit profile activity page — check for any 2+ activities in last 60 days."""
     try:
         # Visit profile first for connection degree
         page.goto(person["profile_url"], wait_until="domcontentloaded")
@@ -678,8 +616,8 @@ def check_profile_activity(page, person, config, local_mode=False):
         random_scroll(page)
         time.sleep(2)
 
-        # Count any activity — 30 days for global, 60 days for local
-        activity_days = 60 if local_mode else 30
+        # Count any activity — 60 days for both global and local
+        activity_days = 60
         recent_activity_count = page.evaluate("""
             (days) => {
                 let count = 0;
@@ -1010,9 +948,18 @@ def _generate_message_ai(person, local_mode=False, location=""):
 - Do NOT say we're in the same city or 'fellow {location} person' — they're not local
 - Just mention I'm a remote engineer open to contract work"""
 
+        # Randomly rotate which backend skill to highlight
+        backend_highlights = [
+            "backend, REST APIs, Python",
+            "backend, DevOps, AWS, Kubernetes",
+            "backend APIs (Python), DevOps, AWS",
+            "backend (Python/REST APIs), K8s, AWS",
+        ]
+        my_skills = random.choice(backend_highlights)
+
         prompt = f"""Write a LinkedIn connection request note. MUST be under 300 characters total.
 
-About me: Ankit, software engineer (backend, DevOps, AWS, Kubernetes), work from home, open to contract work.
+About me: Ankit, software engineer ({my_skills}), work from home, open to contract work.
 
 About them:
 - Name: {first_name}
@@ -1158,8 +1105,6 @@ def do_search(playwright, config, auto_connect=False, local_mode=False):
         location = local_config.get("location", "")
         geo_id = local_config.get("geo_id", "")
         config = {**config}
-        if local_config.get("search_keywords"):
-            config["search_keywords"] = local_config["search_keywords"]
         if geo_id:
             config["_geo_id"] = geo_id
         print(f"\n--- LinkedIn Prospector [LOCAL: {location}] ---")
@@ -1248,7 +1193,7 @@ def do_search(playwright, config, auto_connect=False, local_mode=False):
             save_prospects(all_prospects, config)
             pass  # profiles tracked in Google Sheet
         else:
-            print("\nNo matching prospects found this run. Try adjusting search keywords in config.json.")
+            print("\nNo matching prospects found this run. Try adjusting industry_codes or company_size_codes in config.json.")
 
         # Update session in case cookies were refreshed
         context.storage_state(path=str(session_file))

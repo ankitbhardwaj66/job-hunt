@@ -38,9 +38,11 @@ export ANTHROPIC_API_KEY=your_key_here
 
 **Target:** Small tech companies (11-50 employees) worldwide.
 
-1. **Search** LinkedIn for companies using keywords from `config.json` (software company, SaaS, AI startup, etc.)
+1. **Search** LinkedIn using faceted filters — no keywords. Filters set in `config.json`:
+   - `industry_codes`: IT Services, Software Development, Tech/Internet, Cloud, Security, etc.
+   - `company_size_codes`: `["C"]` = 11–50 employees
+   - Paginates up to 10 pages of results per run
 2. **Filter out** spammy/generic companies:
-   - Names that are just search keywords ("SaaS Company")
    - Companies with country names ("OrpinsAI USA")
    - Incubators, academies, VC firms, communities, events
    - Companies in `skip_companies` list (e.g. past employers)
@@ -58,11 +60,12 @@ export ANTHROPIC_API_KEY=your_key_here
    - Mid-level managers (project managers, scrum masters)
    - Job seekers (Open to Work badge, "available for" in headline)
    - Trainers, recruiters, designers, freelancers
-5. **Check activity** on their profile — must have 2+ activities (posts, comments, reactions) in last **30 days**
+5. **Check activity** on their profile — must have 2+ activities (posts, comments, reactions) in last **60 days**
 6. **Generate message** using Claude AI:
    - Casual, human-sounding, under 300 characters
    - Uses short company name, not full legal name
    - Checks if headline matches company (detects job changes)
+   - Randomly rotates skill highlights (Python/backend, DevOps, AWS/K8s)
    - No emojis, no corporate speak
 7. **Send connection request** with personalized note:
    - Matches Connect button by person's name (avoids sidebar clicks)
@@ -77,8 +80,8 @@ export ANTHROPIC_API_KEY=your_key_here
 
 Everything from global mode, plus:
 
-- **Location filter** uses LinkedIn's `companyHqGeo` parameter (Chandigarh geo ID: `104458930`) instead of keyword stuffing
-- **Activity window** is **60 days** instead of 30 (smaller local pool)
+- **Location filter** uses LinkedIn's `companyHqGeo` parameter (Chandigarh geo ID: `104458930`)
+- **Activity window** is **60 days** (smaller local pool)
 - **Detects person's location** from their profile before messaging
 - **Chandigarh tricity** — Mohali, SAS Nagar, Panchkula, Zirakpur, Kharar, Derabassi, Baddi all count as local
 - **Message adapts to location:**
@@ -108,18 +111,40 @@ Edit `config.json`:
 
 ```json
 {
-  "search_keywords": ["software company", "SaaS", ...],
+  "industry_codes": ["96", "4", "6", "3", "48", "5", "2458"],
+  "company_size_codes": ["C"],
   "max_companies_per_run": 15,
   "max_connects_per_company": 2,
   "skip_companies": ["Netsmartz"],
   "delay_between_actions": { "min_seconds": 3, "max_seconds": 8 },
   "local_mode": {
     "location": "Chandigarh",
-    "geo_id": "104458930",
-    "search_keywords": ["software company", "IT services", ...]
+    "geo_id": "104458930"
   }
 }
 ```
+
+### Industry Codes Reference
+
+| Code | Industry |
+|------|----------|
+| `96` | IT Services and IT Consulting |
+| `4`  | Software Development |
+| `6`  | Technology, Information and Internet |
+| `3`  | Technology, Information and Media |
+| `48` | Computer and Network Security |
+| `5`  | Computer Networking |
+| `2458` | Data Infrastructure and Analytics |
+
+To add more: go to LinkedIn company search → Industry filter → select the industry → copy the code from the URL's `industryCompanyVertical` parameter.
+
+### Company Size Codes
+
+| Code | Size |
+|------|------|
+| `B`  | 1–10 |
+| `C`  | 11–50 |
+| `D`  | 51–200 |
 
 ## Safety
 
@@ -127,6 +152,6 @@ Edit `config.json`:
 - Real Chrome browser (not headless)
 - Hides automation flags
 - Session persisted locally (no credentials in code)
-- Pagination up to 3 pages per keyword
+- Pagination up to 10 pages per run
 - Max 2 connects per company
 - Never sends connect without trying to add a note first

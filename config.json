@@ -1,15 +1,6 @@
 {
-  "search_keywords": [
-    "software company",
-    "tech startup",
-    "SaaS company",
-    "web development agency",
-    "AI startup",
-    "fintech startup",
-    "devops company",
-    "cloud services company"
-  ],
-  "company_size_filter": "1-50",
+  "industry_codes": ["96", "4", "6", "3", "48", "5", "2458"],
+  "company_size_codes": ["C"],
   "target_roles": [
     "CEO",
     "CTO",
@@ -36,18 +27,7 @@
   "output_file": "prospects.csv",
   "local_mode": {
     "location": "Chandigarh",
-    "geo_id": "104458930",
-    "search_keywords": [
-      "software company",
-      "IT company",
-      "tech startup",
-      "web development",
-      "app development",
-      "SaaS",
-      "IT services",
-      "cloud services",
-      "software development"
-    ]
+    "geo_id": "104458930"
   },
   "google_sheets": {
     "enabled": true,
