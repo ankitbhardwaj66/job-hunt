@@ -478,6 +478,30 @@ def find_people_at_company(page, company, config, seen_profiles, local_mode=Fals
                 print(f"    No people found for {company['name']}")
                 return people
 
+        # Click "Show more results" up to 5 times to load more employees
+        for click_num in range(1, 6):
+            random_scroll(page)
+            time.sleep(1)
+            clicked = page.evaluate("""
+                () => {
+                    const buttons = document.querySelectorAll('button');
+                    for (const btn of buttons) {
+                        const text = btn.innerText.trim().toLowerCase();
+                        if (text.includes('show more') || text.includes('load more') || text.includes('see more')) {
+                            if (btn.offsetParent !== null) {
+                                btn.click();
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                }
+            """)
+            if not clicked:
+                break
+            print(f"    Loaded more results ({click_num})")
+            time.sleep(2)
+
         raw_people = extract_people_from_page(page)
         print(f"    Extracted {len(raw_people)} people entries from page")
 
