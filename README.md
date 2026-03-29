@@ -39,34 +39,31 @@ export ANTHROPIC_API_KEY=your_key_here
 **Target:** Small tech companies (11-50 employees) worldwide.
 
 1. **Search** LinkedIn using faceted filters — no keywords. Filters set in `config.json`:
-   - `industry_codes`: IT Services, Software Development, Tech/Internet, Cloud, Security, etc.
+   - `industry_codes`: list of industries to rotate through (one per run)
    - `company_size_codes`: `["C"]` = 11–50 employees
-   - Paginates up to 10 pages of results per run
+   - Each run searches one industry, saves progress to `.industry_state.json`, picks the next one next run, loops
+   - Paginates up to 10 pages per run
 2. **Filter out** spammy/generic companies:
    - Companies with country names ("OrpinsAI USA")
    - Incubators, academies, VC firms, communities, events
    - Companies in `skip_companies` list (e.g. past employers)
    - Already prospected companies (checked against Google Sheet)
-3. **Find decision-makers** at each company, sorted by priority:
-   - CTO / Chief Technology Officer
-   - Engineering Manager / Tech Lead
-   - Head of Engineering / VP of Engineering
-   - Director of Engineering
-   - COO / CMO / Managing Director
-   - CEO
-   - Founder / Co-Founder
+3. **Find decision-makers** at each company:
+   - Collects all employees from the company's people page
+   - Excludes obvious non-targets by headline (developers, interns, recruiters, etc.)
+   - Visits each remaining profile and reads the **Experience section** to get their actual job title
+   - Falls back to headline text if experience section hasn't loaded
+   - Sorted by priority: CTO → Engineering Manager / Tech Lead → Head of Eng → VP Eng → Director → President → CEO → Founder
 4. **Filter out non-targets:**
    - Individual contributors (developers, engineers, architects)
    - Mid-level managers (project managers, scrum masters)
-   - Job seekers (Open to Work badge, "available for" in headline)
-   - Trainers, recruiters, designers, freelancers
+   - Job seekers (Open to Work badge)
+   - Recruiters, trainers, designers, staffing/recruitment agencies
 5. **Check activity** on their profile — must have 2+ activities (posts, comments, reactions) in last **60 days**
 6. **Generate message** using Claude AI:
-   - Casual, human-sounding, under 300 characters
-   - Uses short company name, not full legal name
-   - Checks if headline matches company (detects job changes)
-   - Randomly rotates skill highlights (Python/backend, DevOps, AWS/K8s)
-   - No emojis, no corporate speak
+   - Direct intro: "I'm Ankit, backend/DevOps engineer with 10+ yrs exp..."
+   - Under 300 characters, no greeting, no emojis
+   - Mentions open to contract work
 7. **Send connection request** with personalized note:
    - Matches Connect button by person's name (avoids sidebar clicks)
    - Tries main button first, then More dropdown
@@ -136,7 +133,9 @@ Edit `config.json`:
 | `5`  | Computer Networking |
 | `2458` | Data Infrastructure and Analytics |
 
-To add more: go to LinkedIn company search → Industry filter → select the industry → copy the code from the URL's `industryCompanyVertical` parameter.
+Each run searches one industry in order and saves the current position to `.industry_state.json`. Delete that file to reset. To jump to a specific industry, set `{"last_index": N}` in it.
+
+To add more industries: go to LinkedIn company search → Industry filter → select the industry → copy the code from the URL's `industryCompanyVertical` parameter.
 
 ### Company Size Codes
 
