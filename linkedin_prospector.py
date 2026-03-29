@@ -453,7 +453,7 @@ def find_people_at_company(page, company, config, seen_profiles, local_mode=Fals
     print(f"\n  Looking for decision-makers at {company['name']}...")
 
     # Visit the company's people page with keyword filter to pre-filter decision-makers
-    dm_keywords = "manager, cto, vp, head, president, chief, architect"
+    dm_keywords = "manager, cto, vp, head, president, chief, architect, senior"
     people_url = f"https://www.linkedin.com/company/{company['slug']}/people/?keywords={quote(dm_keywords)}"
 
     try:
@@ -693,10 +693,10 @@ def check_profile_activity(page, person, config, local_mode=False):
                     const context = lines.slice(i, Math.min(lines.length, i + 4)).join(' ').toLowerCase();
                     const isCurrent = context.includes('present');
 
-                    return { title, isCurrent, companyLine: lines[i] };
+                    return { title, isCurrent, companyLine: lines[i], expText: expText };
                 }
 
-                return null;
+                return { title: null, isCurrent: false, companyLine: null, expText: expText };
             }
         """, company_name)
 
@@ -717,6 +717,7 @@ def check_profile_activity(page, person, config, local_mode=False):
         matched_role = None
         matched_source = None
         headline = person.get("headline", "")
+        exp_text = (title_at_company or {}).get("expText", "") or ""
 
         # Determine the title to evaluate — prefer experience section, fall back to headline
         if title_at_company and title_at_company.get("title"):
@@ -729,29 +730,35 @@ def check_profile_activity(page, person, config, local_mode=False):
             company_line = company_name
             src_label = "headline"
 
-        # Ask AI if this title = decision-maker who can assign contract work
-        is_dm, role_label = _is_decision_maker_ai(check_title, company_name, headline)
+        # Ask AI: decision-maker, senior engineer, or skip?
+        target_type, role_label = _is_decision_maker_ai(check_title, company_name, headline, exp_text)
 
-        if is_dm is True:
+        if target_type == "decision_maker":
             matched_role = role_label
             matched_source = f"ai+{src_label}"
-        elif is_dm is False:
-            print(f"    [skip] {person['name']} — AI: '{check_title}' is not a decision-maker ({role_label})")
+            person["target_type"] = "decision_maker"
+        elif target_type == "senior_engineer":
+            matched_role = role_label
+            matched_source = f"ai+{src_label}"
+            person["target_type"] = "senior_engineer"
+        elif target_type == "skip":
+            print(f"    [skip] {person['name']} — AI: '{check_title}' → {role_label}")
             person["has_recent_activity"] = False
             return person
         else:
-            # AI unavailable — fall back to string matching
+            # AI unavailable — fall back to string matching (decision-maker only)
             for role in role_patterns_check:
                 if role in check_title.lower():
                     matched_role = role
                     matched_source = f"string+{src_label}"
+                    person["target_type"] = "decision_maker"
                     break
 
         if matched_role:
             person["matched_role"] = matched_role
-            print(f"    [{matched_source}] {person['name']} — '{check_title}' at '{company_line}'")
+            print(f"    [{matched_source}] {person['name']} — '{check_title}' ({person.get('target_type', '?')})")
         else:
-            print(f"    [skip] {person['name']} — no decision-maker role found at {company_name}")
+            print(f"    [skip] {person['name']} — no target role found at {company_name}")
             person["has_recent_activity"] = False
             return person
 
@@ -1053,38 +1060,60 @@ _SALUTATIONS = {
 }
 
 
-def _is_decision_maker_ai(title, company, headline=""):
-    """Ask Claude if this title can assign contract work. Returns (bool, role_label)."""
+def _is_decision_maker_ai(title, company, headline="", exp_text=""):
+    """Ask Claude if this person is worth connecting with.
+    Returns (target_type, role_label) where target_type is:
+      'decision_maker' — can assign contract work
+      'senior_engineer' — senior backend/DevOps engineer, 8+ years
+      'skip'           — not a useful contact
+      None             — API unavailable, fall back to string match
+    """
     try:
         import anthropic
         client = anthropic.Anthropic()
-        prompt = f"""Can this person assign or approve contract/freelance work for developers?
+        prompt = f"""Evaluate this LinkedIn profile to decide if I should send a connection request.
 
-Title: {title}
+Current title: {title}
 Company: {company}
 LinkedIn headline: {headline}
+Experience section (for calculating total years):
+{exp_text[:600] if exp_text else "(not available)"}
 
-I'm looking for: CTOs, founders, engineering managers, heads of engineering, VPs, directors, CEOs, tech architects, solutions architects, or anyone else with authority to hire contract developers.
-I do NOT want: individual contributors, developers, designers, recruiters, interns, students, or mid-level non-hiring roles.
+I want to connect with TWO types of people:
+
+TYPE 1 — Decision-maker: someone who can assign or approve contract/freelance developer work.
+Examples: CTO, Engineering Manager, VP Engineering, Head of Engineering, Tech Lead, Solutions Architect, Tech Architect, President, Chief Officer.
+NOT: recruiters, HR, designers, interns, sales, mid-level ops.
+
+TYPE 2 — Senior backend/DevOps engineer with 8+ years of total experience.
+These are peers who may be working on personal projects or have side opportunities.
+Estimate total years from the experience section dates. Only qualify if clearly 8+ years in backend, DevOps, cloud, or infrastructure roles.
+NOT: junior/mid engineers, QA, frontend-only, data science.
 
 Reply with exactly two lines:
-DECISION: YES or NO
-ROLE: short label like "cto", "founder", "engineering manager", "vp engineering", "not a decision maker", etc."""
+TYPE: DECISION_MAKER or SENIOR_ENGINEER or SKIP
+ROLE: short label like "cto", "engineering manager", "senior devops engineer", "skip - recruiter", etc."""
 
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=60,
+            max_tokens=80,
             messages=[{"role": "user", "content": prompt}],
         )
         text = response.content[0].text.strip()
-        lines = {l.split(":")[0].strip().upper(): l.split(":", 1)[1].strip().lower()
-                 for l in text.splitlines() if ":" in l}
-        is_dm = lines.get("DECISION", "no") == "yes"
-        role_label = lines.get("ROLE", title.lower()[:40])
-        return is_dm, role_label
+        parsed = {l.split(":")[0].strip().upper(): l.split(":", 1)[1].strip().lower()
+                  for l in text.splitlines() if ":" in l}
+        target_type_raw = parsed.get("TYPE", "skip")
+        role_label = parsed.get("ROLE", title.lower()[:40])
+
+        if "decision_maker" in target_type_raw:
+            return "decision_maker", role_label
+        elif "senior_engineer" in target_type_raw:
+            return "senior_engineer", role_label
+        else:
+            return "skip", role_label
     except Exception as e:
         print(f"    [ai] Decision-maker check failed: {e}")
-        return None, None  # None = unknown, fall back to string match
+        return None, None  # None = API unavailable, fall back to string match
 
 
 def _clean_first_name(name):
@@ -1129,7 +1158,26 @@ def _generate_message_ai(person, local_mode=False, location=""):
 - Do NOT say we're in the same city or 'fellow {location} person' — they're not local
 - Just mention I'm a remote engineer open to contract work"""
 
-        prompt = f"""Write a LinkedIn connection request note. MUST be under 300 characters total.
+        target_type = person.get("target_type", "decision_maker")
+
+        if target_type == "senior_engineer":
+            prompt = f"""Write a LinkedIn connection request note. MUST be under 300 characters total.
+
+About me: Ankit, backend/DevOps engineer, 10+ years of experience, love learning new tech and solving hard problems.
+
+About them: {first_name}, a senior backend/DevOps engineer at {company}.
+Their headline: {headline}
+
+Rules:
+- MUST be under 300 characters (hard LinkedIn limit)
+- NO greeting like "Hi" or "Hey" — start with "I'm Ankit" or "Ankit here"
+- Peer-to-peer tone — we're both senior engineers
+- Say I'm available if they're working on something interesting on a contractual basis
+- No corporate buzzwords, no emojis
+- End with "Let's connect!" or "Would love to connect!"
+- Just output the message, nothing else"""
+        else:
+            prompt = f"""Write a LinkedIn connection request note. MUST be under 300 characters total.
 
 About me: Ankit, backend/DevOps engineer, 10+ years of experience, love learning new tech and solving problems, open to contract work.
 
@@ -1178,7 +1226,10 @@ def _generate_message_fallback(person, local_mode=False, location=""):
     if len(company) > 25:
         company = company[:22] + "..."
 
-    if local_mode and location:
+    target_type = person.get("target_type", "decision_maker")
+    if target_type == "senior_engineer":
+        msg = f"I'm Ankit, backend/DevOps engineer with 10+ yrs exp. If you're working on something interesting and need an extra hand on a contractual basis — I'm available. Let's connect!"
+    elif local_mode and location:
         msg = f"I'm Ankit, backend/DevOps engineer with 10+ yrs exp. Love solving problems and learning new tech. Based in {location}, open to contract work. Would love to connect!"
     else:
         msg = f"I'm Ankit, backend/DevOps engineer with 10+ yrs exp. Love learning new tech and solving problems. Saw {company} — open to contract work. Let's connect!"
