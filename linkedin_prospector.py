@@ -823,10 +823,10 @@ def check_profile_activity(page, person, config, local_mode=False):
                 for (const s of spans) {
                     const text = s.innerText.trim().toLowerCase();
                     if (!text) continue;
-                    // hours/days/weeks → within 6 months
-                    if (text.match(/^\\d+\\s*(s|m|h|d|w)$/)) return true;
-                    // months: only if <= 6
-                    const mo = text.match(/^(\\d+)\\s*mo$/);
+                    // hours/days/weeks → within 6 months ("1d •", "2w • Edited" etc.)
+                    if (text.match(/^\\d+\\s*(s|m|h|d|w)\\b/)) return true;
+                    // months: only if <= 6 ("1mo •", "3mo • Edited •" etc.)
+                    const mo = text.match(/^(\\d+)\\s*mo\\b/);
                     if (mo && parseInt(mo[1]) <= 6) return true;
                 }
 
