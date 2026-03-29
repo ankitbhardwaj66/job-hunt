@@ -452,8 +452,9 @@ def find_people_at_company(page, company, config, seen_profiles, local_mode=Fals
 
     print(f"\n  Looking for decision-makers at {company['name']}...")
 
-    # Visit the company's people page directly
-    people_url = f"https://www.linkedin.com/company/{company['slug']}/people/"
+    # Visit the company's people page with keyword filter to pre-filter decision-makers
+    dm_keywords = "manager, cto, ceo, founder, director, vp, head, president, chief"
+    people_url = f"https://www.linkedin.com/company/{company['slug']}/people/?keywords={quote(dm_keywords)}"
 
     try:
         page.goto(people_url, wait_until="domcontentloaded")
