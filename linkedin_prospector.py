@@ -798,93 +798,49 @@ def check_profile_activity(page, person, config, local_mode=False):
             person["has_recent_activity"] = False
             return person
 
-        # Visit "All activity" page — shows posts, comments, and reactions
+        # Check posts page — simpler and more reliable than parsing the activity feed.
+        # We just need to know: did this person post anything in the last 6 months?
         profile_slug = person["profile_url"].rstrip("/").split("/")[-1]
-        activity_url = f"https://www.linkedin.com/in/{profile_slug}/recent-activity/all/"
-        page.goto(activity_url, wait_until="domcontentloaded")
-        time.sleep(5)
-        # Scroll several times to trigger lazy loading of activity feed
-        for _ in range(4):
-            random_scroll(page)
-            time.sleep(1.5)
-        # Wait for actual feed content — skeleton loaders use role="progressbar" or similar
-        # Give it up to 8 more seconds for content to replace skeletons
-        for _ in range(4):
-            has_content = page.evaluate("""
-                () => {
-                    const items = document.querySelectorAll(
-                        '.feed-shared-update-v2, .occludable-update, [data-urn], .artdeco-list__item'
-                    );
-                    return items.length > 0;
-                }
-            """)
-            if has_content:
-                break
-            time.sleep(2)
+        posts_url = f"https://www.linkedin.com/in/{profile_slug}/recent-activity/posts/"
+        page.goto(posts_url, wait_until="domcontentloaded")
+        time.sleep(4)
+        random_scroll(page)
+        time.sleep(2)
 
-        # Count any activity — 60 days for both global and local
-        activity_days = 60
-        recent_activity_count = page.evaluate("""
-            (days) => {
-                let count = 0;
+        has_recent_post = page.evaluate("""
+            () => {
+                const sixMonthsMs = 180 * 24 * 60 * 60 * 1000;
+                const cutoff = Date.now() - sixMonthsMs;
 
-                // Helper: parse relative time text to days ago
-                function parseDaysAgo(text) {
-                    text = text.toLowerCase().trim();
-                    if (text.includes('just now') || text.includes('moment')) return 0;
-                    let m;
-                    if ((m = text.match(/(\\d+)\\s*m\\b/)) && !text.includes('mo')) return 0;
-                    if ((m = text.match(/(\\d+)\\s*h/))) return 0;
-                    if ((m = text.match(/(\\d+)\\s*d/))) return parseInt(m[1]);
-                    if ((m = text.match(/(\\d+)\\s*w/))) return parseInt(m[1]) * 7;
-                    if ((m = text.match(/(\\d+)\\s*mo/))) return parseInt(m[1]) * 30;
-                    if ((m = text.match(/(\\d+)\\s*yr/))) return parseInt(m[1]) * 365;
-                    return null;
-                }
-
-                // Strategy 1: All activity feed items (posts, shares, comments, reactions)
-                // Each feed item has a timestamp somewhere
-                const allText = document.querySelectorAll(
-                    'time, ' +
-                    'span[aria-hidden="true"], ' +
-                    '.feed-shared-actor__sub-description, ' +
-                    '.update-components-actor__sub-description'
-                );
-                const seen = new Set();
-                for (const el of allText) {
-                    const text = el.innerText.trim();
-                    if (seen.has(text) || text.length > 50) continue;
-                    seen.add(text);
-
-                    const daysAgo = parseDaysAgo(text);
-                    if (daysAgo !== null && daysAgo <= days) {
-                        count++;
-                    }
-                }
-
-                // Strategy 2: <time> elements with datetime attributes
-                const cutoff = Date.now() - (days * 24 * 60 * 60 * 1000);
+                // Strategy 1: <time datetime="..."> elements
                 const timeTags = document.querySelectorAll('time[datetime]');
                 for (const t of timeTags) {
-                    const key = t.getAttribute('datetime');
-                    if (seen.has(key)) continue;
-                    seen.add(key);
-                    const dt = new Date(key);
-                    if (dt.getTime() > cutoff) {
-                        count++;
-                    }
+                    const dt = new Date(t.getAttribute('datetime'));
+                    if (dt.getTime() > cutoff) return true;
                 }
 
-                return count;
-            }
-        """, activity_days)
+                // Strategy 2: relative time strings like "1w", "2mo", "3mo"
+                const spans = document.querySelectorAll('span[aria-hidden="true"]');
+                for (const s of spans) {
+                    const text = s.innerText.trim().toLowerCase();
+                    if (!text) continue;
+                    // Any hours/days/weeks is within 6 months
+                    if (text.match(/^\\d+\\s*(s|m|h|d|w)$/)) return true;
+                    // Months: only if <= 6
+                    const mo = text.match(/^(\\d+)\\s*mo$/);
+                    if (mo && parseInt(mo[1]) <= 6) return true;
+                }
 
-        person["recent_activity_30d"] = recent_activity_count
-        person["has_recent_activity"] = recent_activity_count >= 2
-        if person["has_recent_activity"]:
-            print(f"    [active] {person['name']} — {recent_activity_count} activities in last {activity_days} days")
+                return false;
+            }
+        """)
+
+        person["recent_activity_30d"] = 1 if has_recent_post else 0
+        person["has_recent_activity"] = has_recent_post
+        if has_recent_post:
+            print(f"    [active] {person['name']} — posted within last 6 months")
         else:
-            print(f"    [inactive] {person['name']} — only {recent_activity_count} activities in last {activity_days} days, skipping connect")
+            print(f"    [inactive] {person['name']} — no posts in last 6 months, skipping connect")
 
     except Exception as e:
         print(f"    [activity] Error checking {person['name']}: {e}")
