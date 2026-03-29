@@ -627,23 +627,53 @@ def check_profile_activity(page, person, config, local_mode=False):
             random_scroll(page)
             time.sleep(1)
 
-        # Extract Experience section text via page innerText — resilient to DOM changes.
-        # LinkedIn lazy-loads sections, so we parse the full visible text.
-        exp_lines = page.evaluate("""
-            () => {
+        # Extract the job title at THIS specific company from the Experience section.
+        # Strategy: find the company name in the experience text, then take the line above it
+        # (LinkedIn layout: title line → company line → dates line → ...).
+        # Also check for "Present" nearby to confirm it's a current role.
+        company_name = person["company"]
+        title_at_company = page.evaluate("""
+            (companyName) => {
                 const fullText = document.body.innerText;
-                // Find the Experience heading and grab text until the next major section
+
+                // Isolate the Experience section
                 const expMatch = fullText.match(
-                    /\\nExperience\\n([\\s\\S]*?)(?:\\n(?:Education|Skills|Certifications|Licenses|Recommendations|Volunteering|Interests|Languages|Publications|Projects|Honors|Courses|Organizations|Test scores)\\n|$)/
+                    /\\nExperience\\n([\\s\\S]*?)(?=\\n(?:Education|Skills|Certifications|Licenses|Recommendations|Volunteering|Interests|Languages|Publications|Projects|Honors|Courses|Organizations|Test scores)\\n|$)/
                 );
-                if (!expMatch) return [];
-                return expMatch[1]
-                    .split('\\n')
-                    .map(l => l.trim().toLowerCase())
-                    .filter(l => l.length > 1 && l.length < 120)
-                    .slice(0, 40);
+                if (!expMatch) return null;
+
+                const expText = expMatch[1];
+                const lines = expText.split('\\n').map(l => l.trim()).filter(l => l.length > 0);
+
+                // Build fuzzy match keywords from company name
+                // e.g. "BeGig Technologies Pvt Ltd" → ["begig", "technologies"]
+                const companyLower = companyName.toLowerCase();
+                const companyWords = companyLower
+                    .replace(/[^a-z0-9 ]/g, ' ')
+                    .split(' ')
+                    .filter(w => w.length > 3);  // skip short words like "pvt", "ltd", "the"
+
+                for (let i = 1; i < lines.length; i++) {
+                    const lineLower = lines[i].toLowerCase();
+
+                    // Check if this line is the company line
+                    const isMatch = companyWords.length > 0 &&
+                        companyWords.some(w => lineLower.includes(w));
+                    if (!isMatch) continue;
+
+                    // Title is the line immediately above the company line
+                    const title = lines[i - 1].toLowerCase();
+
+                    // Peek ahead a few lines to check if this is a current role
+                    const context = lines.slice(i, Math.min(lines.length, i + 4)).join(' ').toLowerCase();
+                    const isCurrent = context.includes('present');
+
+                    return { title, isCurrent, companyLine: lines[i] };
+                }
+
+                return null;
             }
-        """)
+        """, company_name)
 
         role_patterns_check = [
             "cto", "chief technology", "chief technical",
@@ -659,27 +689,41 @@ def check_profile_activity(page, person, config, local_mode=False):
             "founder", "co-founder", "founder's office",
         ]
 
-        # Check experience lines first, then fall back to headline (already has role info often)
-        sources = [("exp", exp_lines), ("headline", [person.get("headline", "").lower()])]
         matched_role = None
         matched_source = None
-        for source_name, lines in sources:
-            for line in lines:
-                for role in role_patterns_check:
-                    if role in line:
-                        matched_role = role
-                        matched_source = source_name
-                        break
-                if matched_role:
+
+        # Primary: title at this specific company from Experience section
+        if title_at_company and title_at_company.get("title"):
+            exp_title = title_at_company["title"]
+            is_current = title_at_company.get("isCurrent", False)
+            company_line = title_at_company.get("companyLine", "")
+            for role in role_patterns_check:
+                if role in exp_title:
+                    matched_role = role
+                    matched_source = "exp (current)" if is_current else "exp (past)"
                     break
             if matched_role:
-                break
+                print(f"    [{matched_source}] {person['name']} — '{exp_title}' at '{company_line}'")
+            else:
+                print(f"    [skip] {person['name']} — title at company is '{exp_title}' (not a decision-maker)")
+                person["has_recent_activity"] = False
+                return person
+
+        # Fallback: headline text (covers cases where experience section didn't load)
+        if not matched_role:
+            headline_lower = person.get("headline", "").lower()
+            for role in role_patterns_check:
+                if role in headline_lower:
+                    matched_role = role
+                    matched_source = "headline"
+                    break
 
         if matched_role:
             person["matched_role"] = matched_role
-            print(f"    [{matched_source}] {person['name']} — role: '{matched_role}'")
+            if matched_source == "headline":
+                print(f"    [headline] {person['name']} — role: '{matched_role}' (exp section not found)")
         else:
-            print(f"    [skip] {person['name']} — no decision-maker role found (exp lines: {exp_lines[:4]})")
+            print(f"    [skip] {person['name']} — no decision-maker role found at {company_name}")
             person["has_recent_activity"] = False
             return person
 
