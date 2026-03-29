@@ -691,37 +691,40 @@ def check_profile_activity(page, person, config, local_mode=False):
 
         matched_role = None
         matched_source = None
+        headline = person.get("headline", "")
 
-        # Primary: title at this specific company from Experience section
+        # Determine the title to evaluate — prefer experience section, fall back to headline
         if title_at_company and title_at_company.get("title"):
-            exp_title = title_at_company["title"]
+            check_title = title_at_company["title"]
             is_current = title_at_company.get("isCurrent", False)
             company_line = title_at_company.get("companyLine", "")
-            for role in role_patterns_check:
-                if role in exp_title:
-                    matched_role = role
-                    matched_source = "exp (current)" if is_current else "exp (past)"
-                    break
-            if matched_role:
-                print(f"    [{matched_source}] {person['name']} — '{exp_title}' at '{company_line}'")
-            else:
-                print(f"    [skip] {person['name']} — title at company is '{exp_title}' (not a decision-maker)")
-                person["has_recent_activity"] = False
-                return person
+            src_label = "exp (current)" if is_current else "exp (past)"
+        else:
+            check_title = headline
+            company_line = company_name
+            src_label = "headline"
 
-        # Fallback: headline text (covers cases where experience section didn't load)
-        if not matched_role:
-            headline_lower = person.get("headline", "").lower()
+        # Ask AI if this title = decision-maker who can assign contract work
+        is_dm, role_label = _is_decision_maker_ai(check_title, company_name, headline)
+
+        if is_dm is True:
+            matched_role = role_label
+            matched_source = f"ai+{src_label}"
+        elif is_dm is False:
+            print(f"    [skip] {person['name']} — AI: '{check_title}' is not a decision-maker ({role_label})")
+            person["has_recent_activity"] = False
+            return person
+        else:
+            # AI unavailable — fall back to string matching
             for role in role_patterns_check:
-                if role in headline_lower:
+                if role in check_title.lower():
                     matched_role = role
-                    matched_source = "headline"
+                    matched_source = f"string+{src_label}"
                     break
 
         if matched_role:
             person["matched_role"] = matched_role
-            if matched_source == "headline":
-                print(f"    [headline] {person['name']} — role: '{matched_role}' (exp section not found)")
+            print(f"    [{matched_source}] {person['name']} — '{check_title}' at '{company_line}'")
         else:
             print(f"    [skip] {person['name']} — no decision-maker role found at {company_name}")
             person["has_recent_activity"] = False
@@ -1023,6 +1026,40 @@ _SALUTATIONS = {
     "mr", "mr.", "mrs", "mrs.", "ms", "ms.", "dr", "dr.", "prof", "prof.",
     "sir", "shri", "smt", "ca", "er", "er.", "ca.",
 }
+
+
+def _is_decision_maker_ai(title, company, headline=""):
+    """Ask Claude if this title can assign contract work. Returns (bool, role_label)."""
+    try:
+        import anthropic
+        client = anthropic.Anthropic()
+        prompt = f"""Can this person assign or approve contract/freelance work for developers?
+
+Title: {title}
+Company: {company}
+LinkedIn headline: {headline}
+
+I'm looking for: CTOs, founders, engineering managers, heads of engineering, VPs, directors, CEOs, or anyone else with authority to hire contract developers.
+I do NOT want: individual contributors, developers, designers, recruiters, interns, students, or mid-level non-hiring roles.
+
+Reply with exactly two lines:
+DECISION: YES or NO
+ROLE: short label like "cto", "founder", "engineering manager", "vp engineering", "not a decision maker", etc."""
+
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=60,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = response.content[0].text.strip()
+        lines = {l.split(":")[0].strip().upper(): l.split(":", 1)[1].strip().lower()
+                 for l in text.splitlines() if ":" in l}
+        is_dm = lines.get("DECISION", "no") == "yes"
+        role_label = lines.get("ROLE", title.lower()[:40])
+        return is_dm, role_label
+    except Exception as e:
+        print(f"    [ai] Decision-maker check failed: {e}")
+        return None, None  # None = unknown, fall back to string match
 
 
 def _clean_first_name(name):
