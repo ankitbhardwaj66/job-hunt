@@ -798,21 +798,19 @@ def check_profile_activity(page, person, config, local_mode=False):
             person["has_recent_activity"] = False
             return person
 
-        # Check posts page — simpler and more reliable than parsing the activity feed.
-        # We just need to know: did this person post anything in the last 6 months?
-        profile_slug = person["profile_url"].rstrip("/").split("/")[-1]
-        posts_url = f"https://www.linkedin.com/in/{profile_slug}/recent-activity/posts/"
-        page.goto(posts_url, wait_until="domcontentloaded")
-        time.sleep(4)
+        # Check activity section on the profile page — already loaded, no extra navigation.
+        # Scroll down a bit more to make sure the Activity section is visible.
         random_scroll(page)
-        time.sleep(2)
+        time.sleep(1)
+        random_scroll(page)
+        time.sleep(1)
 
         has_recent_post = page.evaluate("""
             () => {
                 const sixMonthsMs = 180 * 24 * 60 * 60 * 1000;
                 const cutoff = Date.now() - sixMonthsMs;
 
-                // Strategy 1: <time datetime="..."> elements
+                // Strategy 1: <time datetime="..."> elements on the page
                 const timeTags = document.querySelectorAll('time[datetime]');
                 for (const t of timeTags) {
                     const dt = new Date(t.getAttribute('datetime'));
@@ -820,13 +818,14 @@ def check_profile_activity(page, person, config, local_mode=False):
                 }
 
                 // Strategy 2: relative time strings like "1w", "2mo", "3mo"
+                // found in the Activity section of the profile
                 const spans = document.querySelectorAll('span[aria-hidden="true"]');
                 for (const s of spans) {
                     const text = s.innerText.trim().toLowerCase();
                     if (!text) continue;
-                    // Any hours/days/weeks is within 6 months
+                    // hours/days/weeks → within 6 months
                     if (text.match(/^\\d+\\s*(s|m|h|d|w)$/)) return true;
-                    // Months: only if <= 6
+                    // months: only if <= 6
                     const mo = text.match(/^(\\d+)\\s*mo$/);
                     if (mo && parseInt(mo[1]) <= 6) return true;
                 }
