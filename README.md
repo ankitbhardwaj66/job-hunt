@@ -56,7 +56,9 @@ flowchart TD
         S5 -->|yes · skip| S4
         S5 -->|no| S6{Pass name filters?\nstealth · VC · recruiter\ncountry · placeholder}
         S6 -->|fail| S4
-        S6 -->|pass| S7[Add to list]
+        S6 -->|pass| S6b{AI: tech company?\nsoftware · SaaS · cloud · IT}
+        S6b -->|no| S4
+        S6b -->|yes| S7[Add to list]
         S7 --> S8{max_companies\nreached?}
         S8 -->|no| S4
         S8 -->|yes| DONE_SEARCH
@@ -129,7 +131,7 @@ flowchart TD
 **Target:** Small tech companies (11–50 employees) worldwide.
 
 1. **Industry rotation** — each run searches one industry, saves index to `.industry_state.json`, picks the next one next run, loops. Reset by deleting the file.
-2. **Company filters** — skips stealth companies, VCs, recruitment agencies, placeholders ("Startup"), companies with country names in the name, incubators, etc.
+2. **Company filters** — skips stealth companies, VCs, recruitment agencies, placeholders ("Startup"), companies with country names in the name, incubators, etc. Then **AI filters each page** to drop non-tech companies (civil engineering, military, trade associations, construction, NGOs) that slip through due to inaccurate LinkedIn industry self-reporting.
 3. **People search** — hits `company/people/?keywords=manager,cto,vp,head,president,chief,architect,senior,staff,principal,lead,developer,engineer` to pre-filter by title, then clicks "Show more results" up to 5× to load all matches.
 4. **AI candidate selection** — if more than 10 people found, Claude Haiku picks the best 10 based on visible headlines (decision-makers + senior engineers) before visiting any profile.
 5. **Profile + experience check** — visits each selected profile, scrolls to load the Experience section, finds the person's **current** title at this specific company (skips freelance/past roles), then asks AI: decision-maker / senior engineer / skip?
