@@ -300,8 +300,8 @@ def search_companies(page, config):
                     print(f"    [skip] {orig_name} — LinkedIn page, not a company")
                     continue
 
-                if "stealth mode" in name_lower:
-                    print(f"    [skip] {orig_name} — stealth mode company")
+                if "stealth" in name_lower:
+                    print(f"    [skip] {orig_name} — stealth company")
                     continue
 
                 vc_words = {"venture capital", "ventures", "capital", "investment", "angel", "fund", "vc "}
@@ -328,6 +328,7 @@ def search_companies(page, config):
                     "bootcamp", "boot camp", "university", "college",
                     "institute", "forum", "mixer", "show", "expo",
                     "conference", "summit", "meetup", "podcast",
+                    "recruitment", "recruiting", "staffing", "headhunter",
                 }
                 if any(dt in name_lower for dt in disqualifying_types):
                     print(f"    [skip] {orig_name} — org type not a target company")
