@@ -36,6 +36,18 @@ SESSION_DIR = SCRIPT_DIR / ".linkedin_session"
 DEBUG_DIR = SCRIPT_DIR / "debug"
 PROSPECTS_SEEN_FILE = SCRIPT_DIR / ".seen_profiles.json"
 INDUSTRY_STATE_FILE = SCRIPT_DIR / ".industry_state.json"
+FILTER_STATE_FILE = SCRIPT_DIR / ".filter_matrix_state.json"
+
+INDUSTRY_NAMES = {
+    "4":    "Software Development",
+    "96":   "IT Services & Consulting",
+    "6":    "Tech, Info & Internet",
+    "48":   "Computer & Network Security",
+    "2458": "Data Infrastructure & Analytics",
+    "5":    "Computer Networking",
+    "3":    "Tech, Info & Media",
+}
+SIZE_LABELS = {"B": "1-10", "C": "11-50", "D": "51-200", "E": "201-500"}
 
 
 def load_config():
@@ -228,39 +240,45 @@ def _load_existing_from_sheet(config):
     return slugs, profile_urls
 
 
-def search_companies(page, config):
-    """Search LinkedIn for small tech companies using faceted filters (no keyword search)."""
+def search_companies(page, config, force_combo=None):
+    """Search LinkedIn for small tech companies using faceted filters (no keyword search).
+
+    force_combo: dict from the filter matrix with geo_id, size, industry.
+    When provided, skips the INDUSTRY_STATE_FILE rotation and uses the combo directly.
+    """
     companies = []
     seen_companies = config.get("_existing_slugs", set())
     max_companies = config["max_companies_per_run"]
 
-    industry_codes = config.get("industry_codes", ["96", "4"])
-    size_codes = config.get("company_size_codes", ["C"])
-    geo_id = config.get("_geo_id", "")
-
-    # Pick one industry per run, rotating through the list
-    if INDUSTRY_STATE_FILE.exists():
-        with open(INDUSTRY_STATE_FILE) as f:
-            state = json.load(f)
-        current_index = state.get("last_index", 0)
+    if force_combo:
+        # Matrix mode — use the combination's settings exactly
+        current_industry = force_combo["industry"]
+        size_codes = [force_combo["size"]]
+        geo_id = force_combo.get("geo_id", "")
+        industry_label = force_combo["industry_name"]
+        next_label = "(matrix controls next)"
     else:
-        current_index = 0
-    current_index = current_index % len(industry_codes)
-    next_index = (current_index + 1) % len(industry_codes)
-    current_industry = industry_codes[current_index]
-    with open(INDUSTRY_STATE_FILE, "w") as f:
-        json.dump({"last_index": next_index}, f)
+        # Legacy rotation mode — pick one industry per run from config
+        industry_codes = config.get("industry_codes", ["96", "4"])
+        size_codes = config.get("company_size_codes", ["C"])
+        geo_id = config.get("_geo_id", "")
 
-    industry_names = {
-        "96": "IT Services & Consulting", "4": "Software Development",
-        "6": "Tech, Info & Internet", "3": "Tech, Info & Media",
-        "48": "Computer & Network Security", "5": "Computer Networking",
-        "2458": "Data Infrastructure & Analytics",
-    }
-    industry_label = industry_names.get(current_industry, f"industry {current_industry}")
-    next_label = industry_names.get(industry_codes[next_index], f"industry {industry_codes[next_index]}")
+        if INDUSTRY_STATE_FILE.exists():
+            with open(INDUSTRY_STATE_FILE) as f:
+                rot_state = json.load(f)
+            current_index = rot_state.get("last_index", 0)
+        else:
+            current_index = 0
+        current_index = current_index % len(industry_codes)
+        next_index = (current_index + 1) % len(industry_codes)
+        current_industry = industry_codes[current_index]
+        with open(INDUSTRY_STATE_FILE, "w") as f:
+            json.dump({"last_index": next_index}, f)
 
-    # Build faceted search URL with just the current industry
+        industry_label = INDUSTRY_NAMES.get(current_industry, f"industry {current_industry}")
+        next_label = INDUSTRY_NAMES.get(industry_codes[next_index], f"industry {industry_codes[next_index]}")
+
+    # Build faceted search URL
     industry_param = quote(json.dumps([current_industry], separators=(",", ":")))
     size_param = quote(json.dumps(size_codes, separators=(",", ":")))
     base_url = (
@@ -273,8 +291,13 @@ def search_companies(page, config):
         geo_param = quote(json.dumps([geo_id], separators=(",", ":")))
         base_url += f"&companyHqGeo={geo_param}"
 
-    print(f"\nSearching industry: {industry_label} (code {current_industry}) [{current_index + 1}/{len(industry_codes)}]")
-    print(f"Next run will search: {next_label}")
+    if force_combo:
+        geo_label = force_combo["geo_name"]
+        size_label = force_combo["size_label"]
+        print(f"\nSearching: {geo_label}  ·  {size_label} employees  ·  {industry_label}")
+    else:
+        print(f"\nSearching industry: {industry_label} (code {current_industry})")
+        print(f"Next run will search: {next_label}")
     print(f"Search URL: {base_url}")
 
     # Paginate through results (up to 10 pages = ~100 companies)
@@ -1861,6 +1884,118 @@ def do_inbox(playwright, config, do_replies=True, do_followup=False):
             pass
 
 
+def _generate_matrix_combinations(config):
+    """Generate all filter combinations in priority order from config's filter_matrix."""
+    matrix = config.get("filter_matrix", {})
+    geos = matrix.get("geos", [])
+    sizes = matrix.get("sizes", ["C"])
+    industries = matrix.get("industries", list(INDUSTRY_NAMES.keys()))
+
+    combos = []
+    for geo in geos:
+        for industry in industries:
+            for size in sizes:
+                geo_slug = geo["name"].replace(", ", "_").replace(" ", "_")
+                combos.append({
+                    "combo_id": f"{geo_slug}_{size}_{industry}",
+                    "geo_name": geo["name"],
+                    "geo_id": geo.get("id", ""),
+                    "size": size,
+                    "size_label": SIZE_LABELS.get(size, size),
+                    "industry": industry,
+                    "industry_name": INDUSTRY_NAMES.get(industry, industry),
+                    "status": "pending",   # pending | in_progress | exhausted
+                    "companies_found": 0,
+                    "runs": 0,
+                    "last_run": None,
+                })
+    return combos
+
+
+def load_filter_state(config):
+    """Load filter matrix state, or initialise it from config if missing."""
+    if FILTER_STATE_FILE.exists():
+        with open(FILTER_STATE_FILE) as f:
+            state = json.load(f)
+        # If new geos/industries were added to config, append missing combos
+        existing_ids = {c["combo_id"] for c in state["combinations"]}
+        for combo in _generate_matrix_combinations(config):
+            if combo["combo_id"] not in existing_ids:
+                state["combinations"].append(combo)
+                print(f"  [matrix] New combination added: {combo['geo_name']} / {combo['industry_name']}")
+        return state
+
+    # First run — create fresh state
+    combos = _generate_matrix_combinations(config)
+    state = {"combinations": combos}
+    save_filter_state(state)
+    print(f"  [matrix] Initialised filter matrix with {len(combos)} combinations.")
+    return state
+
+
+def save_filter_state(state):
+    with open(FILTER_STATE_FILE, "w") as f:
+        json.dump(state, f, indent=2)
+
+
+def get_next_combination(state):
+    """Return (index, combo) for the first pending or in_progress combination."""
+    for i, combo in enumerate(state["combinations"]):
+        if combo["status"] in ("pending", "in_progress"):
+            return i, combo
+    return None, None   # all exhausted
+
+
+def print_filter_stats(state):
+    """Print a progress table of all filter combinations."""
+    combos = state["combinations"]
+    exhausted = sum(1 for c in combos if c["status"] == "exhausted")
+    in_prog   = sum(1 for c in combos if c["status"] == "in_progress")
+    pending   = sum(1 for c in combos if c["status"] == "pending")
+    total = len(combos)
+
+    idx_next, next_combo = get_next_combination(state)
+
+    bar_done  = "█" * exhausted
+    bar_left  = "░" * (total - exhausted)
+    pct = int(exhausted / total * 100) if total else 0
+
+    print(f"\n{'═'*72}")
+    print(f" Filter Matrix — {exhausted}/{total} done ({pct}%) · {in_prog} in progress · {pending} pending")
+    print(f" [{bar_done}{bar_left}]")
+    print(f"{'═'*72}")
+    print(f"  {'':2} {'Geo':<22} {'Size':<7} {'Industry':<26} {'Status':<12} {'Runs':>5} {'Found':>6}")
+    print(f"  {'─'*2} {'─'*22} {'─'*7} {'─'*26} {'─'*12} {'─'*5} {'─'*6}")
+
+    # Group by geo for readability
+    current_geo = None
+    for i, combo in enumerate(combos):
+        if combo["geo_name"] != current_geo:
+            current_geo = combo["geo_name"]
+
+        status = combo["status"]
+        icon = "✓" if status == "exhausted" else \
+               "▶" if status == "in_progress" else "·"
+        marker = "►► " if i == idx_next else "   "
+
+        print(
+            f"{marker}{icon} "
+            f"{combo['geo_name']:<22} "
+            f"{combo['size_label']:<7} "
+            f"{combo['industry_name']:<26} "
+            f"{status:<12} "
+            f"{combo['runs']:>5} "
+            f"{combo['companies_found']:>6}"
+        )
+
+    print(f"{'═'*72}")
+    if next_combo:
+        print(f" Next run: {next_combo['geo_name']}  ·  {next_combo['size_label']} employees  ·  {next_combo['industry_name']}")
+    else:
+        print(" All combinations exhausted. Reset .filter_matrix_state.json to restart.")
+    print()
+
+
 def do_search(playwright, config, auto_connect=False, local_mode=False):
     """Run the full search pipeline."""
     session_file = SESSION_DIR / "state.json"
@@ -1868,9 +2003,12 @@ def do_search(playwright, config, auto_connect=False, local_mode=False):
         print("No saved session found. Run with --login first.")
         sys.exit(1)
 
-    # Override keywords and set geo filter if local mode
     location = ""
+    force_combo = None
+    filter_state = None
+
     if local_mode:
+        # Local mode uses its own geo — bypass matrix
         local_config = config.get("local_mode", {})
         location = local_config.get("location", "")
         geo_id = local_config.get("geo_id", "")
@@ -1878,6 +2016,21 @@ def do_search(playwright, config, auto_connect=False, local_mode=False):
         if geo_id:
             config["_geo_id"] = geo_id
         print(f"\n--- LinkedIn Prospector [LOCAL: {location}] ---")
+    elif config.get("filter_matrix", {}).get("geos"):
+        # Matrix mode — pick next combination
+        filter_state = load_filter_state(config)
+        combo_idx, force_combo = get_next_combination(filter_state)
+        if force_combo is None:
+            print("\nAll filter combinations exhausted!")
+            print_filter_stats(filter_state)
+            return
+        force_combo["status"] = "in_progress"
+        force_combo["runs"] += 1
+        force_combo["last_run"] = datetime.now().strftime("%Y-%m-%d")
+        save_filter_state(filter_state)
+        print(f"\n--- LinkedIn Prospector [MATRIX] ---")
+        print(f"Combination {combo_idx + 1}/{len(filter_state['combinations'])}: "
+              f"{force_combo['geo_name']} · {force_combo['size_label']} emp · {force_combo['industry_name']}")
     else:
         print("\n--- LinkedIn Prospector ---")
 
@@ -1915,8 +2068,21 @@ def do_search(playwright, config, auto_connect=False, local_mode=False):
 
         print("Session valid. Starting search...\n")
 
-        # Step 1: Find companies
-        companies = search_companies(page, config)
+        # Step 1: Find companies (pass force_combo for matrix mode)
+        companies = search_companies(page, config, force_combo=force_combo)
+
+        # Update matrix state based on search result
+        if filter_state and force_combo is not None:
+            force_combo["companies_found"] += len(companies)
+            if len(companies) == 0:
+                force_combo["status"] = "exhausted"
+                print(f"\n[matrix] No new companies found — marking combination exhausted.")
+                # Preview next
+                _, nxt = get_next_combination(filter_state)
+                if nxt:
+                    print(f"[matrix] Next combination: {nxt['geo_name']} · {nxt['industry_name']}")
+            save_filter_state(filter_state)
+            print_filter_stats(filter_state)
 
         # Step 2: Find people at each company
         total = len(companies)
@@ -1963,9 +2129,8 @@ def do_search(playwright, config, auto_connect=False, local_mode=False):
         # Save results
         if all_prospects:
             save_prospects(all_prospects, config)
-            pass  # profiles tracked in Google Sheet
         else:
-            print("\nNo matching prospects found this run. Try adjusting industry_codes or company_size_codes in config.json.")
+            print("\nNo matching prospects found this run.")
 
         # Update session in case cookies were refreshed
         context.storage_state(path=str(session_file))
@@ -1989,17 +2154,18 @@ def do_search(playwright, config, auto_connect=False, local_mode=False):
 
 def main():
     parser = argparse.ArgumentParser(description="LinkedIn Prospector - Find contract job opportunities")
-    parser.add_argument("--login", action="store_true", help="Open browser for manual LinkedIn login")
-    parser.add_argument("--search", action="store_true", help="Run the company/people search (default if no flags)")
-    parser.add_argument("--connect", action="store_true", help="Auto-send connection requests with personalized notes")
-    parser.add_argument("--local", action="store_true", help="Chandigarh mode — target local companies with local messaging")
-    parser.add_argument("--inbox", action="store_true", help="Reply to people who responded to your connection requests")
+    parser.add_argument("--login",    action="store_true", help="Open browser for manual LinkedIn login")
+    parser.add_argument("--search",   action="store_true", help="Run the company/people search (default if no flags)")
+    parser.add_argument("--connect",  action="store_true", help="Auto-send connection requests with personalized notes")
+    parser.add_argument("--local",    action="store_true", help="Chandigarh mode — target local companies with local messaging")
+    parser.add_argument("--inbox",    action="store_true", help="Reply to people who responded to your connection requests")
     parser.add_argument("--followup", action="store_true", help="Send follow-up message to people who haven't replied yet")
+    parser.add_argument("--matrix",   action="store_true", help="Show filter matrix progress table and exit (no search)")
     args = parser.parse_args()
 
     # Default to search if no flags given
     if not args.login and not args.search and not args.connect and not args.local \
-            and not args.inbox and not args.followup:
+            and not args.inbox and not args.followup and not args.matrix:
         args.search = True
 
     # --connect or --local implies --search
@@ -2008,6 +2174,11 @@ def main():
 
     config = load_config()
     SESSION_DIR.mkdir(exist_ok=True)
+
+    if args.matrix:
+        state = load_filter_state(config)
+        print_filter_stats(state)
+        return
 
     with sync_playwright() as p:
         if args.login:

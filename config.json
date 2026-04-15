@@ -1,6 +1,27 @@
 {
   "industry_codes": ["96", "4", "6", "3", "48", "5", "2458"],
   "company_size_codes": ["C"],
+
+  "filter_matrix": {
+    "_note": "Geo IDs from LinkedIn search URL companyHqGeo param. Verify at linkedin.com/search/results/companies/?companyHqGeo=[ID]",
+    "sizes": ["C"],
+    "industries": ["4", "96", "6", "48", "2458", "5", "3"],
+    "geos": [
+      {"name": "Dubai, UAE",          "id": "90010146"},
+      {"name": "Singapore",           "id": "102454443"},
+      {"name": "London, UK",          "id": "90009496"},
+      {"name": "Amsterdam, NL",       "id": "102011674"},
+      {"name": "Toronto, Canada",     "id": "100025096"},
+      {"name": "Sydney, Australia",   "id": "104769905"},
+      {"name": "Berlin, Germany",     "id": "103035651"},
+      {"name": "New York, USA",       "id": "105080838"},
+      {"name": "San Francisco, USA",  "id": "90000070"},
+      {"name": "Bangalore, India",    "id": "105214831"},
+      {"name": "Mumbai, India",       "id": "103137025"}
+    ]
+  },
+
+
   "target_roles": [
     "CEO",
     "CTO",
