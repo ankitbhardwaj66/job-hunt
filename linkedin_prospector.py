@@ -275,6 +275,7 @@ def search_companies(page, config):
 
     print(f"\nSearching industry: {industry_label} (code {current_industry}) [{current_index + 1}/{len(industry_codes)}]")
     print(f"Next run will search: {next_label}")
+    print(f"Search URL: {base_url}")
 
     # Paginate through results (up to 10 pages = ~100 companies)
     for page_num in range(1, 11):
@@ -804,48 +805,53 @@ def check_profile_activity(page, person, config, local_mode=False):
             person["has_recent_activity"] = False
             return person
 
-        # Check activity section on the profile page — already loaded, no extra navigation.
-        # Scroll down a bit more to make sure the Activity section is visible.
-        random_scroll(page)
-        time.sleep(1)
-        random_scroll(page)
-        time.sleep(1)
+        # Navigate to the all-activity page — shows posts, comments AND reactions.
+        activity_url = person["profile_url"].rstrip("/") + "/recent-activity/all/"
+        page.goto(activity_url, wait_until="domcontentloaded")
+        page_delay(config)
+        # Scroll to load more activity items
+        for _ in range(3):
+            random_scroll(page)
+            time.sleep(1)
 
-        has_recent_post = page.evaluate("""
+        activity_count = page.evaluate("""
             () => {
-                const sixMonthsMs = 180 * 24 * 60 * 60 * 1000;
-                const cutoff = Date.now() - sixMonthsMs;
+                const threeMonthsMs = 90 * 24 * 60 * 60 * 1000;
+                const cutoff = Date.now() - threeMonthsMs;
+                let count = 0;
 
-                // Strategy 1: <time datetime="..."> elements on the page
+                // Strategy 1: <time datetime="..."> elements (absolute timestamps)
                 const timeTags = document.querySelectorAll('time[datetime]');
                 for (const t of timeTags) {
                     const dt = new Date(t.getAttribute('datetime'));
-                    if (dt.getTime() > cutoff) return true;
+                    if (dt.getTime() > cutoff) count++;
                 }
 
-                // Strategy 2: relative time strings like "1w", "2mo", "3mo"
-                // found in the Activity section of the profile
-                const spans = document.querySelectorAll('span[aria-hidden="true"]');
-                for (const s of spans) {
-                    const text = s.innerText.trim().toLowerCase();
-                    if (!text) continue;
-                    // hours/days/weeks → within 6 months ("1d •", "2w • Edited" etc.)
-                    if (text.match(/^\\d+\\s*(s|m|h|d|w)\\b/)) return true;
-                    // months: only if <= 6 ("1mo •", "3mo • Edited •" etc.)
-                    const mo = text.match(/^(\\d+)\\s*mo\\b/);
-                    if (mo && parseInt(mo[1]) <= 6) return true;
+                // Strategy 2: relative time strings like "1w", "2mo" in aria-hidden spans
+                if (count === 0) {
+                    const spans = document.querySelectorAll('span[aria-hidden="true"]');
+                    for (const s of spans) {
+                        const text = s.innerText.trim().toLowerCase();
+                        if (!text) continue;
+                        // seconds/minutes/hours/days/weeks → within 3 months
+                        if (text.match(/^\\d+\\s*(s|m|h|d|w)\\b/)) { count++; continue; }
+                        // months: only if <= 3
+                        const mo = text.match(/^(\\d+)\\s*mo\\b/);
+                        if (mo && parseInt(mo[1]) <= 3) count++;
+                    }
                 }
 
-                return false;
+                return count;
             }
         """)
 
-        person["recent_activity_30d"] = 1 if has_recent_post else 0
-        person["has_recent_activity"] = has_recent_post
-        if has_recent_post:
-            print(f"    [active] {person['name']} — posted within last 6 months")
+        is_active = activity_count >= 1
+        person["recent_activity_30d"] = activity_count
+        person["has_recent_activity"] = is_active
+        if is_active:
+            print(f"    [active] {person['name']} — {activity_count} activities in last 3 months")
         else:
-            print(f"    [inactive] {person['name']} — no posts in last 6 months, skipping connect")
+            print(f"    [inactive] {person['name']} — only {activity_count} activity in last 3 months, skipping connect")
 
     except Exception as e:
         print(f"    [activity] Error checking {person['name']}: {e}")
@@ -1067,6 +1073,12 @@ FIELDNAMES = [
     "connection_degree", "found_date", "connect_sent", "local",
 ]
 
+FOLLOWUP_MESSAGE = (
+    "Not sure if you're responsible for any hiring — just wanted to let you know "
+    "I'm open to interesting contractual work. Let me know if something comes up. "
+    "Have a nice day!"
+)
+
 _SALUTATIONS = {
     "mr", "mr.", "mrs", "mrs.", "ms", "ms.", "dr", "dr.", "prof", "prof.",
     "sir", "shri", "smt", "ca", "er", "er.", "ca.",
@@ -1083,11 +1095,13 @@ def _filter_tech_companies_ai(company_names):
         import anthropic
         client = anthropic.Anthropic()
         numbered = "\n".join(f"{i+1}. {name}" for i, name in enumerate(company_names))
-        prompt = f"""I'm looking for tech/software companies that might hire a contract backend or DevOps engineer.
+        prompt = f"""I'm looking for SMALL tech/software companies (11–50 employees) that might hire a contract backend or DevOps engineer.
 
-Which of these company names are likely tech or software companies?
-Include: software companies, SaaS, IT services, cloud/DevOps firms, AI/ML companies, fintech, cybersecurity, dev tools.
-Exclude: civil engineering, construction, military, associations, NGOs, roofing, concrete, roads, government bodies, media publishers, non-tech trade groups.
+Which of these company names are likely small tech or software companies?
+Include: small software companies, SaaS startups, IT services, cloud/DevOps firms, AI/ML startups, fintech, cybersecurity, dev tools — likely 11–50 employees.
+Exclude:
+- Civil engineering, construction, military, associations, NGOs, roofing, government bodies, non-tech trade groups.
+- Well-known large enterprises (Fortune 500, globally recognised brands with thousands of employees) — e.g. Accenture, Nvidia, Google, Microsoft, Amazon, IBM, Infosys, Wipro, TCS, Cognizant, Capgemini, Anthropic, Meta, Apple, Oracle, SAP, Salesforce, etc.
 
 {numbered}
 
@@ -1405,6 +1419,448 @@ def save_prospects(prospects, config):
         print(f"  Saved {len(prospects)} prospects to {output_file}")
 
 
+def _generate_reply_ai(their_message, person_name="", our_original=""):
+    """Generate a short, natural reply to someone who responded to our connection note."""
+    try:
+        import anthropic
+        client = anthropic.Anthropic()
+        first_name = _clean_first_name(person_name) if person_name else "there"
+        original_context = f'\nMy original connection note to them: "{our_original}"' if our_original else ""
+        prompt = f"""Someone replied to my LinkedIn connection request. Write a short, warm reply.
+
+My context: I'm Ankit, backend/DevOps engineer, 10+ years exp, open to contract work.{original_context}
+Their message: "{their_message}"
+
+Rules:
+- Under 200 characters total
+- Match the casual, genuine tone of my original note
+- If they said thanks / nice to meet you → acknowledge warmly and say I'm open to help if they ever need contract work
+- If they asked a question → answer naturally
+- No greeting words like "Hi" or "Hey", no emojis
+- Output just the message text, nothing else"""
+
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=120,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        msg = response.content[0].text.strip().strip('"')
+        if len(msg) > 200:
+            msg = msg[:197] + "..."
+        return msg
+    except Exception as e:
+        print(f"    [ai] Reply generation failed: {e}")
+        return "Thanks for connecting! Happy to chat if you ever need backend or DevOps contract work."
+
+
+def _generate_followup_ai(thread_messages=None, our_note="", person_name=""):
+    """Generate a contextual follow-up based on the full conversation thread.
+
+    If they previously showed interest (mentioned having work, projects, engagements)
+    → friendly reminder about what they mentioned.
+    If they never replied or showed no interest
+    → light nudge: not sure if you're hiring, open to contract work, have a nice day.
+    """
+    try:
+        import anthropic
+        client = anthropic.Anthropic()
+
+        # Build thread text for Claude
+        if thread_messages:
+            thread_lines = []
+            for msg in thread_messages:
+                sender_label = "Ankit (me)" if msg["sender"] == "us" else (person_name or "them")
+                thread_lines.append(f"{sender_label}: {msg['text']}")
+            thread_text = "\n".join(thread_lines)
+        elif our_note:
+            thread_text = f"Ankit (me): {our_note}\n(no reply received)"
+        else:
+            thread_text = "(no conversation history available)"
+
+        prompt = f"""Write a short LinkedIn follow-up message based on this conversation.
+
+Full conversation so far:
+{thread_text}
+
+My context: I'm Ankit, backend/DevOps engineer, 10+ years exp, open to contract work.
+
+Instructions:
+- Read the conversation carefully.
+- If they mentioned having work, projects, or potential engagements → write a friendly reminder like "just a gentle reminder about the [work/projects] you mentioned — still very much interested"
+- If they never replied or showed no real interest → write a light nudge: "not sure if you're responsible for any hiring, just wanted to let you know I'm open to interesting contractual work, let me know if something comes up, have a nice day"
+- Match the casual tone already established in the conversation
+- Under 200 characters
+- No "Hi" or "Hey" opener, no emojis, no corporate buzzwords
+- Output just the message text, nothing else"""
+
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=120,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        msg = response.content[0].text.strip().strip('"')
+        if len(msg) > 200:
+            msg = msg[:197] + "..."
+        return msg
+    except Exception as e:
+        print(f"    [ai] Follow-up generation failed: {e}")
+        return FOLLOWUP_MESSAGE
+
+
+def send_message_in_conversation(page, message):
+    """Type and send a message in the currently open LinkedIn conversation."""
+    # LinkedIn uses a contenteditable div, not a textarea
+    msg_box = (
+        page.query_selector('.msg-form__contenteditable[contenteditable="true"]')
+        or page.query_selector('div.msg-form__contenteditable')
+        or page.query_selector('div[role="textbox"][contenteditable="true"]')
+        or page.query_selector('div[data-placeholder*="message" i][contenteditable]')
+    )
+    if not msg_box:
+        print("    [inbox] Could not find message input box")
+        return False
+
+    msg_box.click()
+    time.sleep(0.5)
+    page.keyboard.press("Control+a")
+    page.keyboard.type(message)
+    time.sleep(1)
+
+    sent = page.evaluate("""
+        () => {
+            const btns = document.querySelectorAll('button');
+            for (const btn of btns) {
+                const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+                const text = btn.innerText.trim().toLowerCase();
+                if ((text === 'send' || aria === 'send' || aria.includes('send message'))
+                        && btn.offsetParent !== null && !btn.disabled) {
+                    btn.click();
+                    return true;
+                }
+            }
+            return false;
+        }
+    """)
+    if sent:
+        time.sleep(2)
+    return bool(sent)
+
+
+def _scan_conversations(page):
+    """Extract conversations from the LinkedIn messaging inbox.
+
+    Uses the confirmed DOM selectors from LinkedIn's current UI:
+    - Container: ul.msg-conversations-container__conversations-list
+    - Items: li.msg-conversation-listitem
+    - Name: h3.msg-conversation-listitem__participant-names span.truncate
+    - Preview: p.msg-conversation-card__message-snippet
+    - Unread: t-bold class on the preview <p>
+
+    LinkedIn always prefixes logged-in user's messages with "You:" in the preview.
+    Returns a list of dicts: idx, name, preview, isUnread, lastSenderIsUs, ourNote.
+    """
+    return page.evaluate("""
+        () => {
+            const list = document.querySelector(
+                '.msg-conversations-container__conversations-list'
+            );
+            if (!list) return [];
+
+            const items = list.querySelectorAll('li.msg-conversation-listitem');
+            const results = [];
+
+            for (let i = 0; i < items.length; i++) {
+                const li = items[i];
+
+                // ── Name ──────────────────────────────────────────────
+                let name = 'Unknown';
+                const h3 = li.querySelector('h3.msg-conversation-listitem__participant-names');
+                if (h3) {
+                    const span = h3.querySelector('span.truncate');
+                    name = (span || h3).innerText.trim().split('\\n')[0].trim();
+                }
+
+                // ── Preview ────────────────────────────────────────────
+                const previewEl = li.querySelector('p.msg-conversation-card__message-snippet');
+                const preview = previewEl ? previewEl.innerText.trim() : '';
+
+                // ── Unread: LinkedIn bolds the preview <p> for unread msgs ──
+                const isUnread = previewEl
+                    ? previewEl.classList.toString().includes('t-bold')
+                    : li.classList.toString().includes('unread') ||
+                      !!li.querySelector('[class*="unread"]');
+
+                // ── Who sent last ──────────────────────────────────────
+                // "You: ..." means we sent last; anything else means they did
+                let lastSenderIsUs = null;
+                if (preview.toLowerCase().startsWith('you:') ||
+                    preview.toLowerCase().startsWith('you ')) {
+                    lastSenderIsUs = true;
+                } else if (preview && !preview.toLowerCase().startsWith('sponsored')) {
+                    lastSenderIsUs = false;
+                }
+
+                // ── Our original note (strip "You: " prefix) ───────────
+                let ourNote = '';
+                if (lastSenderIsUs && preview) {
+                    ourNote = preview.replace(/^you:\s*/i, '').trim();
+                }
+
+                results.push({ idx: i, name, preview, isUnread, lastSenderIsUs, ourNote });
+            }
+            return results;
+        }
+    """) or []
+
+
+def _open_conversation_by_idx(page, idx):
+    """Scroll the conversation at idx into view, click it, and wait for the thread to load."""
+    clicked = page.evaluate("""
+        (idx) => {
+            const list = document.querySelector(
+                '.msg-conversations-container__conversations-list'
+            );
+            if (!list) return false;
+            const items = list.querySelectorAll('li.msg-conversation-listitem');
+            if (idx >= items.length) return false;
+            const li = items[idx];
+            li.scrollIntoView({ block: 'nearest' });
+            const linkDiv = li.querySelector('.msg-conversation-listitem__link');
+            if (linkDiv) { linkDiv.click(); return true; }
+            li.click();
+            return true;
+        }
+    """, idx)
+    if clicked:
+        time.sleep(3)  # wait for thread panel to load
+    return bool(clicked)
+
+
+def _get_full_thread(page, person_name=""):
+    """Read the full conversation from the open thread panel.
+    Returns a list of {sender: 'us'|'them', text: str} dicts."""
+    raw = page.evaluate("""
+        () => {
+            const msgs = [];
+            const items = document.querySelectorAll('.msg-s-event-listitem');
+            for (const item of items) {
+                const body = item.querySelector('.msg-s-event-listitem__body');
+                if (!body) continue;
+                const text = body.innerText.trim();
+                if (!text || text.length < 2) continue;
+                // Their messages have a profile avatar; ours don't
+                const hasAvatar = !!item.querySelector(
+                    'img.presence-entity__image, .msg-s-event-listitem__icon img'
+                );
+                msgs.push({ sender: hasAvatar ? 'them' : 'us', text });
+            }
+            return msgs;
+        }
+    """) or []
+    return raw
+
+
+def do_inbox(playwright, config, do_replies=True, do_followup=False):
+    """Open LinkedIn messaging, reply to conversations where they replied,
+    and/or send follow-up messages to conversations where we haven't heard back."""
+    session_file = SESSION_DIR / "state.json"
+    if not session_file.exists():
+        print("No saved session found. Run with --login first.")
+        sys.exit(1)
+
+    modes = []
+    if do_replies:
+        modes.append("REPLY")
+    if do_followup:
+        modes.append("FOLLOWUP")
+    print(f"\n--- LinkedIn Inbox [{' + '.join(modes)}] ---")
+
+    browser = playwright.chromium.launch(
+        headless=False,
+        args=["--disable-blink-features=AutomationControlled"],
+    )
+    context = browser.new_context(
+        storage_state=str(session_file),
+        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        viewport={"width": 1280, "height": 800},
+    )
+    page = context.new_page()
+    page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+
+    try:
+        page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
+        time.sleep(3)
+        if "login" in page.url:
+            print("Session expired. Run with --login to re-authenticate.")
+            browser.close()
+            sys.exit(1)
+
+        page.goto("https://www.linkedin.com/messaging/", wait_until="domcontentloaded")
+        time.sleep(4)
+
+        try:
+            page.wait_for_selector(
+                '.msg-conversations-container__conversations-list', timeout=10000
+            )
+        except PlaywrightTimeout:
+            print("Could not find conversation list. Check your session.")
+            debug_snapshot(page, "inbox_load_fail")
+            browser.close()
+            return
+
+        # Scroll the conversation list panel (not the page) to trigger lazy-loading
+        # of all conversation items. LinkedIn uses virtual scroll so items below
+        # the fold won't render until scrolled into view.
+        print("Scrolling conversation list to load all items...")
+        for _ in range(6):
+            page.evaluate("""
+                () => {
+                    // Find the scrollable panel that contains the conversation list
+                    const list = document.querySelector(
+                        '.msg-conversations-container__conversations-list'
+                    );
+                    const panel = list && (
+                        list.closest('.msg-conversations-container') ||
+                        list.closest('[class*="conversations-container"]') ||
+                        list.parentElement
+                    );
+                    if (panel) panel.scrollTop += 600;
+                    else if (list) list.scrollTop += 600;
+                }
+            """)
+            time.sleep(1)
+        # Scroll back to top so indices are consistent during iteration
+        page.evaluate("""
+            () => {
+                const list = document.querySelector(
+                    '.msg-conversations-container__conversations-list'
+                );
+                const panel = list && (
+                    list.closest('.msg-conversations-container') ||
+                    list.parentElement
+                );
+                if (panel) panel.scrollTop = 0;
+                else if (list) list.scrollTop = 0;
+            }
+        """)
+        time.sleep(1)
+
+        conversations = _scan_conversations(page)
+        print(f"Found {len(conversations)} conversations in inbox\n")
+
+        if not conversations:
+            print("No conversations parsed — saving debug snapshot.")
+            debug_snapshot(page, "inbox_empty_parse")
+            browser.close()
+            return
+
+        # Print a summary upfront so you can see what was detected
+        for conv in conversations:
+            sender_tag = "last=US  " if conv.get("lastSenderIsUs") else \
+                         "last=THEM" if conv.get("lastSenderIsUs") is False else "last=?   "
+            unread_tag = "[UNREAD]" if conv.get("isUnread") else "        "
+            print(f"  {unread_tag} {sender_tag}  {conv['name']}: {conv.get('preview','')[:70]}")
+
+        print()
+        replied_count = 0
+        followup_count = 0
+
+        for conv in conversations:
+            idx = conv["idx"]
+            name = conv["name"]
+            is_unread = conv.get("isUnread", False)
+            preview = conv.get("preview", "")
+            last_sender_is_us = conv.get("lastSenderIsUs")
+            # ourNote is the preview text stripped of "You:" — our original connection note
+            our_note = conv.get("ourNote", "")
+
+            should_reply = do_replies and is_unread and last_sender_is_us is False
+            should_followup = do_followup and last_sender_is_us is True
+
+            if not should_reply and not should_followup:
+                continue
+
+            # Fast pre-filter: if the preview already looks like a follow-up message we sent,
+            # the thread definitely has 2+ messages → no need to open it.
+            _followup_signals = [
+                "contractual", "not sure if you", "just wanted to let you know",
+                "if anything comes up", "if anything interesting", "no worries if you",
+                "gentle reminder", "humble reminder",
+            ]
+            if should_followup and any(s in preview.lower() for s in _followup_signals):
+                print(f"  [followup] {name} — preview shows follow-up already sent, skipping")
+                continue
+
+            # Click the conversation to open it in the right panel
+            print(f"\n  Opening: {name}")
+            if not _open_conversation_by_idx(page, idx):
+                print(f"  [inbox] Could not click conversation for {name}, skipping")
+                continue
+
+            # Read the full thread so AI has full context
+            thread = _get_full_thread(page, person_name=name)
+            if thread:
+                print(f"    Thread ({len(thread)} messages):")
+                for m in thread:
+                    who = "me" if m["sender"] == "us" else name
+                    print(f"      {who}: {m['text'][:70]}")
+            else:
+                print(f"    (thread not loaded yet, using preview as context)")
+
+            if should_reply:
+                # Find last message from them in the thread
+                their_msg = next(
+                    (m["text"] for m in reversed(thread) if m["sender"] == "them"), preview
+                )
+                print(f"    Their message: {their_msg[:80]}")
+                our_original = next(
+                    (m["text"] for m in thread if m["sender"] == "us"), our_note
+                )
+                reply_text = _generate_reply_ai(their_msg, name, our_original=our_original)
+                print(f"  [reply] Sending: {reply_text}")
+                if send_message_in_conversation(page, reply_text):
+                    print(f"  [reply] SENT to {name}")
+                    replied_count += 1
+                else:
+                    print(f"  [reply] Could not send to {name}")
+
+            elif should_followup:
+                # Only follow up when there is exactly 1 message and it's ours.
+                # Any back-and-forth (replies, multi-message threads) → skip.
+                if not thread:
+                    print(f"  [followup] {name} — could not read thread, skipping to be safe")
+                    continue
+                if not (len(thread) == 1 and thread[0]["sender"] == "us"):
+                    print(f"  [followup] {name} — thread has {len(thread)} message(s), skipping")
+                    continue
+                followup_text = _generate_followup_ai(
+                    thread_messages=thread,
+                    our_note=our_note,
+                    person_name=name,
+                )
+                print(f"  [followup] Sending: {followup_text}")
+                if send_message_in_conversation(page, followup_text):
+                    print(f"  [followup] SENT to {name}")
+                    followup_count += 1
+                else:
+                    print(f"  [followup] Could not send to {name}")
+
+            action_delay(config)
+
+        print(f"\nDone. Replies sent: {replied_count} | Follow-ups sent: {followup_count}")
+        context.storage_state(path=str(session_file))
+
+    except KeyboardInterrupt:
+        print("\nInterrupted!")
+    except Exception as e:
+        print(f"\nError in inbox: {e}")
+    finally:
+        try:
+            browser.close()
+        except Exception:
+            pass
+
+
 def do_search(playwright, config, auto_connect=False, local_mode=False):
     """Run the full search pipeline."""
     session_file = SESSION_DIR / "state.json"
@@ -1537,10 +1993,13 @@ def main():
     parser.add_argument("--search", action="store_true", help="Run the company/people search (default if no flags)")
     parser.add_argument("--connect", action="store_true", help="Auto-send connection requests with personalized notes")
     parser.add_argument("--local", action="store_true", help="Chandigarh mode — target local companies with local messaging")
+    parser.add_argument("--inbox", action="store_true", help="Reply to people who responded to your connection requests")
+    parser.add_argument("--followup", action="store_true", help="Send follow-up message to people who haven't replied yet")
     args = parser.parse_args()
 
     # Default to search if no flags given
-    if not args.login and not args.search and not args.connect and not args.local:
+    if not args.login and not args.search and not args.connect and not args.local \
+            and not args.inbox and not args.followup:
         args.search = True
 
     # --connect or --local implies --search
@@ -1555,6 +2014,8 @@ def main():
             do_login(p)
         if args.search:
             do_search(p, config, auto_connect=args.connect, local_mode=args.local)
+        if args.inbox or args.followup:
+            do_inbox(p, config, do_replies=args.inbox, do_followup=args.followup)
 
 
 if __name__ == "__main__":

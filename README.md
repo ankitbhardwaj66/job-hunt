@@ -30,6 +30,10 @@ export ANTHROPIC_API_KEY=your_key_here
 ./run.sh --local            # Chandigarh mode (local companies only)
 ./run.sh --local --connect  # Chandigarh mode + auto-send
 ./run.sh --login            # Re-login if session expired
+
+./run.sh --inbox            # Reply to people who responded to your connection requests
+./run.sh --followup         # Send follow-up to people who haven't replied yet
+./run.sh --inbox --followup # Do both in one run
 ```
 
 ---
@@ -125,6 +129,30 @@ flowchart TD
 ---
 
 ## How It Works
+
+### Inbox Mode (`./run.sh --inbox`)
+
+Scans your LinkedIn messaging inbox and replies to people who responded to your connection requests.
+
+1. Scrolls the conversation list to load all threads (LinkedIn uses lazy rendering)
+2. Detects unread conversations where the last message is from them (not prefixed with "You:")
+3. Reads the full thread for context
+4. Asks Claude to write a short, natural reply that matches the tone of your original connection note
+5. Sends the reply in the open conversation panel
+
+### Follow-up Mode (`./run.sh --followup`)
+
+Sends a gentle follow-up to people who accepted your connection but never replied.
+
+**Eligibility rule:** Only sends if the thread has **exactly 1 message and it's from you** — meaning they accepted silently with no back-and-forth. Any existing reply from them (even if you replied back) means no follow-up.
+
+1. Reads every conversation where your message was last ("You: ...")
+2. Opens the thread and counts messages — skips anything with 2+ messages
+3. Reads the full thread (your original note) and passes it to Claude
+4. Claude writes a contextual follow-up:
+   - If they mentioned having work/projects → reminder about what they mentioned
+   - If they never replied → light nudge: "not sure if you're responsible for any hiring, open to contractual work, let me know if something comes up"
+5. Sends the follow-up
 
 ### Global Mode (`./run.sh --connect`)
 
