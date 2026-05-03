@@ -184,70 +184,68 @@ def extract_companies_from_page(page):
     return found
 
 
-def _get_sheets_client(config):
-    """Get authenticated gspread client and sheet."""
-    import gspread
-    from google.oauth2.service_account import Credentials
-
-    gs_config = config.get("google_sheets", {})
-    key_path = gs_config.get("service_account_key", "")
-    if not os.path.isabs(key_path):
-        key_path = str(SCRIPT_DIR / key_path)
-    key_path = os.path.expanduser(key_path)
-
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive.readonly",
-    ]
-    creds = Credentials.from_service_account_file(key_path, scopes=scopes)
-    gc = gspread.authorize(creds)
-    sheet = gc.open_by_url(gs_config["sheet_url"]).sheet1
-    return sheet
-
-
-def _load_existing_from_sheet(config):
-    """Load existing data from Google Sheet — company slugs and profile URLs."""
+def _load_existing_from_csv():
+    """Load existing data from local CSV — company slugs, names, and profile URLs."""
     slugs = set()
+    company_names = set()
     profile_urls = set()
+    # Migrate from old fallback filename if needed
+    old_file = SCRIPT_DIR / "prospects_fallback.csv"
+    if not CSV_FILE.exists() and old_file.exists():
+        old_file.rename(CSV_FILE)
+        print(f"Migrated {old_file.name} → {CSV_FILE.name}")
+    if not CSV_FILE.exists():
+        return slugs, company_names, profile_urls
+    # Migrate CSV if header is missing new columns (profile_url / company_url)
     try:
-        sheet = _get_sheets_client(config)
-
-        # Get formulas (not display values) since URLs are in HYPERLINK formulas
-        # get_all_values() returns display text, we need the actual formulas
-        formulas = sheet.get(value_render_option="FORMULA")
-        if not formulas:
-            return slugs, profile_urls
-
-        for row in formulas[1:]:
-            for cell in row:
-                cell = str(cell).strip()
-                if not cell:
-                    continue
-                # Extract company slugs from HYPERLINK formulas or raw URLs
-                company_match = re.search(r'/company/([^/?\"]+)', cell)
-                if company_match:
-                    slugs.add(company_match.group(1))
-                # Extract profile URLs from HYPERLINK formulas or raw URLs
-                profile_match = re.search(r'(https?://[^"]*linkedin\.com/in/[^"/?]+)', cell)
-                if profile_match:
-                    profile_urls.add(profile_match.group(1))
-
-        print(f"Loaded from Google Sheet: {len(slugs)} companies, {len(profile_urls)} profiles")
+        with open(CSV_FILE, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            existing_fields = reader.fieldnames or []
+            if "profile_url" not in existing_fields or "company_slug" not in existing_fields:
+                rows = list(reader)
+        if "profile_url" not in existing_fields or "company_slug" not in existing_fields:
+            with open(CSV_FILE, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=FIELDNAMES, extrasaction="ignore")
+                writer.writeheader()
+                for row in rows:
+                    writer.writerow({k: row.get(k, "") for k in FIELDNAMES})
+            print(f"Migrated {CSV_FILE.name} to new schema ({len(rows)} rows)")
     except Exception as e:
-        print(f"Warning: Could not load from Google Sheet: {e}")
-        print("Continuing without dedup...")
+        print(f"Warning: CSV migration check failed: {e}")
+    try:
+        with open(CSV_FILE, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                slug = row.get("company_slug", "").strip()
+                if not slug:
+                    # fallback for rows written before company_slug column existed
+                    m = re.search(r'/company/([^/?]+)', row.get("company_url", ""))
+                    if m:
+                        slug = m.group(1)
+                if slug:
+                    slugs.add(slug)
+                # Always track company name as fallback (covers sheet-pulled rows with no slug)
+                name = row.get("company", "").strip().lower()
+                if name and name != "no_contact_found":
+                    company_names.add(name)
+                profile_url = row.get("profile_url", "")
+                if profile_url:
+                    profile_urls.add(profile_url)
+        print(f"Loaded from CSV: {len(slugs)} companies by slug, {len(company_names)} by name, {len(profile_urls)} profiles")
+    except Exception as e:
+        print(f"Warning: Could not load from CSV: {e}")
+    return slugs, company_names, profile_urls
 
-    return slugs, profile_urls
 
-
-def search_companies(page, config, force_combo=None):
+def search_companies(page, config, force_combo=None, single_page=None):
     """Search LinkedIn for small tech companies using faceted filters (no keyword search).
 
     force_combo: dict from the filter matrix with geo_id, size, industry.
     When provided, skips the INDUSTRY_STATE_FILE rotation and uses the combo directly.
+    single_page: int (1-5). When set, fetch only that page instead of pages 1-5.
     """
     companies = []
     seen_companies = config.get("_existing_slugs", set())
+    seen_company_names = config.get("_existing_company_names", set())
     max_companies = config["max_companies_per_run"]
 
     if force_combo:
@@ -300,8 +298,9 @@ def search_companies(page, config, force_combo=None):
         print(f"Next run will search: {next_label}")
     print(f"Search URL: {base_url}")
 
-    # Paginate through results (up to 10 pages = ~100 companies)
-    for page_num in range(1, 11):
+    # Paginate through results; in matrix mode fetch one page at a time
+    pages_to_fetch = [single_page] if single_page else range(1, 6)
+    for page_num in pages_to_fetch:
         if len(companies) >= max_companies:
             break
 
@@ -339,12 +338,12 @@ def search_companies(page, config, force_combo=None):
             for comp in page_companies:
                 if len(companies) >= max_companies:
                     break
-                if comp["slug"] in seen_companies:
-                    print(f"    [skip] {comp['name']} — already prospected")
-                    continue
-
                 orig_name = comp["name"].strip()
                 name_lower = orig_name.lower()
+
+                if comp["slug"] in seen_companies or name_lower in seen_company_names:
+                    print(f"    [skip] {orig_name} — already prospected")
+                    continue
 
                 if any(sc in name_lower for sc in skip_companies_list):
                     print(f"    [skip] {orig_name} — in skip list")
@@ -392,6 +391,7 @@ def search_companies(page, config, force_combo=None):
                     continue
 
                 seen_companies.add(comp["slug"])
+                seen_company_names.add(name_lower)
                 companies.append({
                     "name": comp["name"],
                     "slug": comp["slug"],
@@ -575,6 +575,7 @@ def find_people_at_company(page, company, config, seen_profiles, local_mode=Fals
                 "headline": candidate["headline"],
                 "profile_url": candidate["profile_url"],
                 "company": company["name"],
+                "company_slug": company["slug"],
                 "company_url": company["url"],
                 "matched_role": "",  # filled in by check_profile_activity
                 "likely_active": True,
@@ -674,6 +675,23 @@ def check_profile_activity(page, person, config, local_mode=False):
             print(f"    [skip] {person['name']} — has 'Open to work' badge, job seeker")
             person["has_recent_activity"] = False
             return person
+
+        # Check for LinkedIn "Hiring" badge on profile photo frame
+        is_hiring = page.evaluate("""
+            () => {
+                const text = document.body.innerText.toLowerCase();
+                if (text.includes('#hiring') || text.includes('is hiring')) {
+                    const badge = document.querySelector('[class*="hiring"], [aria-label*="hiring" i], [aria-label*="Hiring" i]');
+                    if (badge) return true;
+                    const photoFrame = document.querySelector('img[alt*="Hiring"], div[class*="hiring"]');
+                    if (photoFrame) return true;
+                }
+                return false;
+            }
+        """)
+        person["has_hiring_badge"] = bool(is_hiring)
+        if is_hiring:
+            print(f"    [hiring] {person['name']} — has 'Hiring' badge, skipping activity check")
 
         # Scroll down to trigger lazy-loading of the Experience section
         for _ in range(3):
@@ -826,6 +844,12 @@ def check_profile_activity(page, person, config, local_mode=False):
         else:
             print(f"    [skip] {person['name']} — no target role found at {company_name}")
             person["has_recent_activity"] = False
+            return person
+
+        # Hiring badge = strong signal; skip activity page navigation
+        if person.get("has_hiring_badge"):
+            person["has_recent_activity"] = True
+            person["recent_activity_30d"] = -1  # sentinel: skipped due to hiring badge
             return person
 
         # Navigate to the all-activity page — shows posts, comments AND reactions.
@@ -1094,7 +1118,10 @@ FIELDNAMES = [
     "name", "company",
     "matched_role", "has_recent_activity", "recent_activity_30d",
     "connection_degree", "found_date", "connect_sent", "local",
+    "profile_url", "company_slug", "company_url",
 ]
+
+CSV_FILE = SCRIPT_DIR / "prospects.csv"
 
 FOLLOWUP_MESSAGE = (
     "Not sure if you're responsible for any hiring — just wanted to let you know "
@@ -1216,7 +1243,7 @@ Experience section (for calculating total years):
 I want to connect with TWO types of people:
 
 TYPE 1 — Decision-maker: someone who can assign or approve contract/freelance developer work.
-Examples: CTO, Engineering Manager, VP Engineering, Head of Engineering, Tech Lead, Solutions Architect, Tech Architect, President, Chief Officer.
+Examples: CTO, Engineering Manager, VP Engineering, Head of Engineering, Tech Lead, Solutions Architect, Tech Architect, President, Chief Officer, Product Owner, Product Manager, Head of Product, VP Product, Chief Product Officer.
 NOT: recruiters, HR, designers, interns, sales, mid-level ops, mentors, coaches, trainers, educators, teachers.
 
 TYPE 2 — Senior backend/DevOps engineer with 8+ years of total experience.
@@ -1380,66 +1407,118 @@ def generate_message(person, local_mode=False, location=""):
     return msg
 
 
+def _get_sheet(config):
+    """Return the first worksheet of the configured Google Sheet."""
+    import gspread
+    from google.oauth2.service_account import Credentials
+
+    gs_cfg = config.get("google_sheets", {})
+    key_file = SCRIPT_DIR / gs_cfg.get("service_account_key", "service_account.json")
+    sheet_url = gs_cfg.get("sheet_url", "")
+    if not sheet_url:
+        raise ValueError("google_sheets.sheet_url not set in config.json")
+
+    scopes = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    creds = Credentials.from_service_account_file(str(key_file), scopes=scopes)
+    client = gspread.authorize(creds)
+    spreadsheet = client.open_by_url(sheet_url)
+    return spreadsheet.sheet1
+
+
+def pull_from_google_sheet(config):
+    """Download all rows from Google Sheet and merge into local prospects.csv.
+
+    Rows already in the CSV (matched by profile_url) are skipped.
+    Rows without a profile_url are appended as-is (company-level entries).
+    """
+    print("\n--- Pulling from Google Sheet ---")
+    try:
+        ws = _get_sheet(config)
+    except Exception as e:
+        print(f"Could not connect to Google Sheet: {e}")
+        return
+
+    records = ws.get_all_records()
+    print(f"Sheet has {len(records)} rows.")
+
+    if not records:
+        print("Sheet is empty, nothing to pull.")
+        return
+
+    # Load existing profile URLs from local CSV to avoid duplicates
+    existing_profiles = set()
+    if CSV_FILE.exists():
+        try:
+            with open(CSV_FILE, newline="", encoding="utf-8") as f:
+                for row in csv.DictReader(f):
+                    url = row.get("profile_url", "").strip()
+                    if url:
+                        existing_profiles.add(url)
+        except Exception as e:
+            print(f"Warning: could not read local CSV: {e}")
+
+    new_rows = []
+    for rec in records:
+        profile_url = str(rec.get("profile_url", "")).strip()
+        if profile_url and profile_url in existing_profiles:
+            continue
+        row = {field: str(rec.get(field, "")).strip() for field in FIELDNAMES}
+        # Backfill company_slug from company_url if sheet has it but slug is missing
+        if not row.get("company_slug"):
+            m = re.search(r'/company/([^/?]+)', row.get("company_url", ""))
+            if m:
+                row["company_slug"] = m.group(1)
+        new_rows.append(row)
+        if profile_url:
+            existing_profiles.add(profile_url)
+
+    if not new_rows:
+        print("No new rows to add (all already in local CSV).")
+        return
+
+    file_exists = CSV_FILE.exists()
+    with open(CSV_FILE, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=FIELDNAMES, extrasaction="ignore")
+        if not file_exists:
+            writer.writeheader()
+        writer.writerows(new_rows)
+
+    print(f"Added {len(new_rows)} rows from Google Sheet → {CSV_FILE.name}")
+
+
 def save_prospects(prospects, config):
-    """Save prospects directly to Google Sheet."""
+    """Save prospects to local CSV."""
     if not prospects:
         print("\nNo new prospects to save.")
         return
 
-    try:
-        sheet = _get_sheets_client(config)
-        # Get formulas to extract URLs from HYPERLINK cells
-        existing_formulas = sheet.get(value_render_option="FORMULA")
+    existing_profiles = set()
+    if CSV_FILE.exists():
+        try:
+            with open(CSV_FILE, newline="", encoding="utf-8") as f:
+                for row in csv.DictReader(f):
+                    url = row.get("profile_url", "")
+                    if url:
+                        existing_profiles.add(url)
+        except Exception:
+            pass
 
-        # Ensure header exists
-        if not existing_formulas:
-            sheet.update(values=[FIELDNAMES], range_name="A1")
-            existing_formulas = [FIELDNAMES]
+    new_prospects = [p for p in prospects if p.get("profile_url") not in existing_profiles]
+    if not new_prospects:
+        print("\n  [csv] No new prospects to add (all already in CSV)")
+        return
 
-        # Extract existing profile URLs from HYPERLINK formulas
-        existing_urls = set()
-        for row in existing_formulas[1:]:
-            for cell in row:
-                match = re.search(r'(https?://[^"]*linkedin\.com/in/[^"/?]+)', str(cell))
-                if match:
-                    existing_urls.add(match.group(1))
-
-        # Build new rows (skip duplicates)
-        new_rows = []
-        for person in prospects:
-            if person.get("profile_url") not in existing_urls:
-                row = []
-                for field in FIELDNAMES:
-                    val = str(person.get(field, ""))
-                    # Make name a hyperlink to profile
-                    if field == "name" and person.get("profile_url"):
-                        val = f'=HYPERLINK("{person["profile_url"]}","{val.replace(chr(34), chr(39))}")'
-                    # Make company a hyperlink to company page
-                    elif field == "company" and person.get("company_url"):
-                        val = f'=HYPERLINK("{person["company_url"]}","{val.replace(chr(34), chr(39))}")'
-                    row.append(val)
-                new_rows.append(row)
-
-        if new_rows:
-            next_row = len(existing_formulas) + 1
-            sheet.update(values=new_rows, range_name=f"A{next_row}", value_input_option="USER_ENTERED")
-            print(f"\n  [sheets] Added {len(new_rows)} new prospects to Google Sheet")
-        else:
-            print(f"\n  [sheets] No new prospects to add (all already in sheet)")
-
-    except Exception as e:
-        print(f"\n  [sheets] Error saving to Google Sheet: {e}")
-        # Fallback: save to local CSV so data isn't lost
-        print("  [sheets] Saving to local CSV as fallback...")
-        output_file = SCRIPT_DIR / "prospects_fallback.csv"
-        file_exists = output_file.exists()
-        with open(output_file, "a", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=FIELDNAMES, extrasaction="ignore")
-            if not file_exists:
-                writer.writeheader()
-            for person in prospects:
-                writer.writerow(person)
-        print(f"  Saved {len(prospects)} prospects to {output_file}")
+    file_exists = CSV_FILE.exists()
+    with open(CSV_FILE, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=FIELDNAMES, extrasaction="ignore")
+        if not file_exists:
+            writer.writeheader()
+        for person in new_prospects:
+            writer.writerow(person)
+    print(f"\n  [csv] Added {len(new_prospects)} new prospects to {CSV_FILE.name}")
 
 
 def _generate_reply_ai(their_message, person_name="", our_original=""):
@@ -1907,6 +1986,7 @@ def _generate_matrix_combinations(config):
                     "status": "pending",   # pending | in_progress | exhausted
                     "companies_found": 0,
                     "runs": 0,
+                    "current_page": 0,
                     "last_run": None,
                 })
     return combos
@@ -1917,6 +1997,11 @@ def load_filter_state(config):
     if FILTER_STATE_FILE.exists():
         with open(FILTER_STATE_FILE) as f:
             state = json.load(f)
+        # Backfill current_page for combos created before page-tracking was added
+        for combo in state["combinations"]:
+            if "current_page" not in combo:
+                combo["current_page"] = 5 if combo["status"] == "exhausted" else 0
+
         # If new geos/industries were added to config, append missing combos
         existing_ids = {c["combo_id"] for c in state["combinations"]}
         for combo in _generate_matrix_combinations(config):
@@ -1964,7 +2049,7 @@ def print_filter_stats(state):
     print(f" Filter Matrix — {exhausted}/{total} done ({pct}%) · {in_prog} in progress · {pending} pending")
     print(f" [{bar_done}{bar_left}]")
     print(f"{'═'*72}")
-    print(f"  {'':2} {'Geo':<22} {'Size':<7} {'Industry':<26} {'Status':<12} {'Runs':>5} {'Found':>6}")
+    print(f"  {'':2} {'Geo':<22} {'Size':<7} {'Industry':<26} {'Status':<12} {'Page':>5} {'Found':>6}")
     print(f"  {'─'*2} {'─'*22} {'─'*7} {'─'*26} {'─'*12} {'─'*5} {'─'*6}")
 
     # Group by geo for readability
@@ -1984,7 +2069,7 @@ def print_filter_stats(state):
             f"{combo['size_label']:<7} "
             f"{combo['industry_name']:<26} "
             f"{status:<12} "
-            f"{combo['runs']:>5} "
+            f"{combo.get('current_page', 0):>4}/5 "
             f"{combo['companies_found']:>6}"
         )
 
@@ -2026,6 +2111,7 @@ def do_search(playwright, config, auto_connect=False, local_mode=False):
             return
         force_combo["status"] = "in_progress"
         force_combo["runs"] += 1
+        force_combo["current_page"] += 1
         force_combo["last_run"] = datetime.now().strftime("%Y-%m-%d")
         save_filter_state(filter_state)
         print(f"\n--- LinkedIn Prospector [MATRIX] ---")
@@ -2034,9 +2120,10 @@ def do_search(playwright, config, auto_connect=False, local_mode=False):
     else:
         print("\n--- LinkedIn Prospector ---")
 
-    # Load existing data from Google Sheet
-    existing_slugs, existing_profiles = _load_existing_from_sheet(config)
+    # Load existing data from local CSV
+    existing_slugs, existing_names, existing_profiles = _load_existing_from_csv()
     config["_existing_slugs"] = existing_slugs
+    config["_existing_company_names"] = existing_names
 
     print(f"Max companies: {config['max_companies_per_run']}")
     print(f"Max connects per company: {config.get('max_connects_per_company', 2)}")
@@ -2069,14 +2156,16 @@ def do_search(playwright, config, auto_connect=False, local_mode=False):
         print("Session valid. Starting search...\n")
 
         # Step 1: Find companies (pass force_combo for matrix mode)
-        companies = search_companies(page, config, force_combo=force_combo)
+        single_page = force_combo["current_page"] if force_combo else None
+        companies = search_companies(page, config, force_combo=force_combo, single_page=single_page)
 
         # Update matrix state based on search result
         if filter_state and force_combo is not None:
             force_combo["companies_found"] += len(companies)
-            if len(companies) == 0:
+            if len(companies) == 0 or force_combo["current_page"] >= 5:
                 force_combo["status"] = "exhausted"
-                print(f"\n[matrix] No new companies found — marking combination exhausted.")
+                reason = "page 5 reached" if force_combo["current_page"] >= 5 else "no new companies found"
+                print(f"\n[matrix] {reason} — marking combination exhausted.")
                 # Preview next
                 _, nxt = get_next_combination(filter_state)
                 if nxt:
@@ -2097,6 +2186,7 @@ def do_search(playwright, config, auto_connect=False, local_mode=False):
                     "name": "no_contact_found",
                     "profile_url": "",
                     "company": company["name"],
+                    "company_slug": company["slug"],
                     "company_url": company["url"],
                     "matched_role": "",
                     "has_recent_activity": "",
@@ -2160,12 +2250,14 @@ def main():
     parser.add_argument("--local",    action="store_true", help="Chandigarh mode — target local companies with local messaging")
     parser.add_argument("--inbox",    action="store_true", help="Reply to people who responded to your connection requests")
     parser.add_argument("--followup", action="store_true", help="Send follow-up message to people who haven't replied yet")
-    parser.add_argument("--matrix",   action="store_true", help="Show filter matrix progress table and exit (no search)")
+    parser.add_argument("--matrix",     action="store_true", help="Show filter matrix progress table and exit (no search)")
+    parser.add_argument("--pull-sheet", action="store_true", help="Pull all rows from Google Sheet into local prospects.csv")
     args = parser.parse_args()
 
     # Default to search if no flags given
     if not args.login and not args.search and not args.connect and not args.local \
-            and not args.inbox and not args.followup and not args.matrix:
+            and not args.inbox and not args.followup and not args.matrix \
+            and not args.pull_sheet:
         args.search = True
 
     # --connect or --local implies --search
@@ -2178,6 +2270,10 @@ def main():
     if args.matrix:
         state = load_filter_state(config)
         print_filter_stats(state)
+        return
+
+    if args.pull_sheet:
+        pull_from_google_sheet(config)
         return
 
     with sync_playwright() as p:
