@@ -14,4 +14,15 @@ else
 fi
 
 # Pass all arguments through (e.g. --login, --search)
-python "$SCRIPT_DIR/linkedin_prospector.py" "$@"
+# Usage:
+#   ./run.sh                  → linkedin_prospector (company/people search)
+#   ./run.sh --freelance      → linkedin_freelance_outreach (contract/freelance DMs)
+#   ./run.sh --freelance --login  → save session for freelance script
+
+if [[ "$*" == *"--freelance"* ]]; then
+    # Remove --freelance from args before passing
+    ARGS="${@/--freelance/}"
+    python "$SCRIPT_DIR/linkedin_freelance_outreach.py" $ARGS
+else
+    python "$SCRIPT_DIR/linkedin_prospector.py" "$@"
+fi

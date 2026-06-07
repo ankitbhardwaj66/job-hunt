@@ -1324,7 +1324,7 @@ def _generate_message_ai(person, local_mode=False, location=""):
         if target_type == "senior_engineer":
             prompt = f"""Write a LinkedIn connection request note. MUST be under 300 characters total.
 
-About me: Ankit, backend/DevOps engineer, 10+ years of experience, love learning new tech and solving hard problems.
+About me: Ankit, backend/DevOps engineer, 11+ years of experience, love learning new tech and solving hard problems.
 
 About them: {first_name}, a senior backend/DevOps engineer at {company}.
 Their headline: {headline}
@@ -1340,7 +1340,7 @@ Rules:
         else:
             prompt = f"""Write a LinkedIn connection request note. MUST be under 300 characters total.
 
-About me: Ankit, backend/DevOps engineer, 10+ years of experience, love learning new tech and solving problems, open to contract work.
+About me: Ankit, backend/DevOps engineer, 11+ years of experience, love learning new tech and solving problems, open to contract work.
 
 About them:
 - Name: {first_name}
@@ -1530,7 +1530,7 @@ def _generate_reply_ai(their_message, person_name="", our_original=""):
         original_context = f'\nMy original connection note to them: "{our_original}"' if our_original else ""
         prompt = f"""Someone replied to my LinkedIn connection request. Write a short, warm reply.
 
-My context: I'm Ankit, backend/DevOps engineer, 10+ years exp, open to contract work.{original_context}
+My context: I'm Ankit, backend/DevOps engineer, 11+ years exp, open to contract work.{original_context}
 Their message: "{their_message}"
 
 Rules:
@@ -1584,7 +1584,7 @@ def _generate_followup_ai(thread_messages=None, our_note="", person_name=""):
 Full conversation so far:
 {thread_text}
 
-My context: I'm Ankit, backend/DevOps engineer, 10+ years exp, open to contract work.
+My context: I'm Ankit, backend/DevOps engineer, 11+ years exp, open to contract work.
 
 Instructions:
 - Read the conversation carefully.
