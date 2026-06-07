@@ -2,6 +2,7 @@
 
 ## Git
 - Author: Ankit Bhardwaj <ankitbhardwaj244487@gmail.com>
+- Git user: personal account (ankitbhardwaj244487@gmail.com), NOT Wizeline account
 - Remote: github-ankitjgd:ankitbhardwaj66/job-hunt.git (SSH host alias: github-ankitjgd, key: ~/.ssh/id_ed25519)
 
 ## Resume
