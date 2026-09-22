@@ -80,6 +80,35 @@ def random_scroll(page):
     time.sleep(random.uniform(0.5, 1.5))
 
 
+# Any profile link — the signal that a people list has actually rendered.
+PROFILE_LINK_SELECTOR = 'a[href*="/in/"]'
+
+# When LinkedIn throttles, it stalls the document instead of erroring: the
+# response never completes and nothing renders. A few minutes' rest clears it.
+THROTTLE_BACKOFF_SECONDS = 60
+
+
+def goto_linkedin(page, url, ready_selector=None, ready_timeout=20000):
+    """Navigate to a LinkedIn page and wait for content, not the page lifecycle.
+
+    LinkedIn streams company and profile documents over a long-lived response,
+    so DOMContentLoaded can land 23-45s after the content is already usable —
+    past Playwright's 30s default. Waiting on it made every company look like it
+    had no decision-makers. Wait for the navigation to commit (~0.5s), then for
+    a real element to appear.
+
+    Returns True when the page is ready, False if ready_selector never showed up.
+    """
+    page.goto(url, wait_until="commit")
+    if ready_selector is None:
+        return True
+    try:
+        page.wait_for_selector(ready_selector, timeout=ready_timeout)
+        return True
+    except PlaywrightTimeout:
+        return False
+
+
 def load_seen_profiles():
     """Load previously seen profile URLs to avoid duplicates."""
     if PROSPECTS_SEEN_FILE.exists():
@@ -487,27 +516,25 @@ def find_people_at_company(page, company, config, seen_profiles, local_mode=Fals
     people_url = f"https://www.linkedin.com/company/{company['slug']}/people/?keywords={quote(dm_keywords)}"
 
     try:
-        page.goto(people_url, wait_until="domcontentloaded")
-        time.sleep(3)
+        if not goto_linkedin(page, people_url, PROFILE_LINK_SELECTOR):
+            # Nothing rendered — usually throttling rather than an empty company.
+            # Rest once and retry before giving up on this company.
+            if THROTTLE_BACKOFF_SECONDS:
+                print(f"    People list didn't render — resting {THROTTLE_BACKOFF_SECONDS}s and retrying...")
+                time.sleep(THROTTLE_BACKOFF_SECONDS)
+            if not goto_linkedin(page, people_url, PROFILE_LINK_SELECTOR):
+                # Fallback: try search-based approach
+                print(f"    No people on company page, trying search...")
+                search_url = f"https://www.linkedin.com/search/results/people/?keywords={quote(company['name'])}"
+                if not goto_linkedin(page, search_url, PROFILE_LINK_SELECTOR):
+                    # We never actually saw a rendered people list, so we cannot
+                    # say this company has no contacts. Flag it for a retry
+                    # instead of recording it as permanently visited.
+                    print(f"    Could not load people for {company['name']} — will retry next run")
+                    company["lookup_error"] = True
+                    return people
         random_scroll(page)
         time.sleep(2)
-
-        # Try waiting for any profile links
-        try:
-            page.wait_for_selector('a[href*="/in/"]', timeout=8000)
-        except PlaywrightTimeout:
-            # Fallback: try search-based approach
-            print(f"    No people on company page, trying search...")
-            search_url = f"https://www.linkedin.com/search/results/people/?keywords={quote(company['name'])}"
-            page.goto(search_url, wait_until="domcontentloaded")
-            time.sleep(3)
-            random_scroll(page)
-            time.sleep(2)
-            try:
-                page.wait_for_selector('a[href*="/in/"]', timeout=8000)
-            except PlaywrightTimeout:
-                print(f"    No people found for {company['name']}")
-                return people
 
         # Click "Show more results" up to 5 times to load more employees
         for click_num in range(1, 6):
@@ -589,8 +616,12 @@ def find_people_at_company(page, company, config, seen_profiles, local_mode=Fals
         action_delay(config)
 
     except PlaywrightTimeout:
+        # Mark it as a failed lookup, not an empty one — otherwise the caller
+        # records "no contact found" and the company is skipped forever.
+        company["lookup_error"] = True
         print(f"  Timeout looking at {company['name']}, moving on...")
     except Exception as e:
+        company["lookup_error"] = True
         print(f"  Error at {company['name']}: {e}")
 
     # Sort by role priority — CTOs and engineering managers first
@@ -604,7 +635,7 @@ def check_profile_activity(page, person, config, local_mode=False):
     """Visit profile activity page — check for any 2+ activities in last 60 days."""
     try:
         # Visit profile first for connection degree
-        page.goto(person["profile_url"], wait_until="domcontentloaded")
+        goto_linkedin(page, person["profile_url"], "main")
         page_delay(config)
 
         # Try to get connection degree
@@ -852,39 +883,68 @@ def check_profile_activity(page, person, config, local_mode=False):
             person["recent_activity_30d"] = -1  # sentinel: skipped due to hiring badge
             return person
 
-        # Navigate to the all-activity page — shows posts, comments AND reactions.
-        activity_url = person["profile_url"].rstrip("/") + "/recent-activity/all/"
-        page.goto(activity_url, wait_until="domcontentloaded")
-        page_delay(config)
-        # Scroll to load more activity items
-        for _ in range(3):
+        # Read activity from the profile page's own Activity section. The
+        # standalone /recent-activity/ pages stopped rendering entirely
+        # (document stays in readyState "loading" with an empty body), so we
+        # stay on the profile we already loaded and scroll the section in.
+        for _ in range(4):
             random_scroll(page)
             time.sleep(1)
 
         activity_count = page.evaluate("""
             () => {
+                // Scope to the Activity section so we don't count timestamps
+                // from elsewhere on the profile.
+                let root = document.getElementById('content_collections')
+                        || document.getElementById('recent_activity');
+                if (root) root = root.closest('section') || root.parentElement;
+                if (!root) {
+                    for (const sec of document.querySelectorAll('section')) {
+                        if (/\\bActivity\\b/i.test((sec.innerText || '').slice(0, 200))) {
+                            root = sec;
+                            break;
+                        }
+                    }
+                }
+                // -1 means "couldn't find the section" — not the same as "no activity"
+                if (!root) return -1;
+
                 const threeMonthsMs = 90 * 24 * 60 * 60 * 1000;
                 const cutoff = Date.now() - threeMonthsMs;
                 let count = 0;
 
                 // Strategy 1: <time datetime="..."> elements (absolute timestamps)
-                const timeTags = document.querySelectorAll('time[datetime]');
+                const timeTags = root.querySelectorAll('time[datetime]');
                 for (const t of timeTags) {
                     const dt = new Date(t.getAttribute('datetime'));
                     if (dt.getTime() > cutoff) count++;
                 }
 
-                // Strategy 2: relative time strings like "1w", "2mo" in aria-hidden spans
+                // Strategy 2: relative time strings like "3d •", "2w", "1mo".
+                // These no longer live in aria-hidden spans (those now hold
+                // engagement counts like "2 reposts"). Each timestamp renders as
+                // nested div > p > span sharing the same text, so count only the
+                // outermost match — otherwise every post counts three times.
                 if (count === 0) {
-                    const spans = document.querySelectorAll('span[aria-hidden="true"]');
-                    for (const s of spans) {
-                        const text = s.innerText.trim().toLowerCase();
-                        if (!text) continue;
+                    const isStamp = (t) => {
+                        if (!t || t.length > 25) return false;
                         // seconds/minutes/hours/days/weeks → within 3 months
-                        if (text.match(/^\\d+\\s*(s|m|h|d|w)\\b/)) { count++; continue; }
+                        if (/^\\d+\\s*(s|m|h|d|w)\\b/.test(t)) return true;
                         // months: only if <= 3
-                        const mo = text.match(/^(\\d+)\\s*mo\\b/);
-                        if (mo && parseInt(mo[1]) <= 3) count++;
+                        const mo = t.match(/^(\\d+)\\s*mo\\b/);
+                        return !!(mo && parseInt(mo[1]) <= 3);
+                    };
+                    const matched = new Set();
+                    for (const el of root.querySelectorAll('*')) {
+                        const text = (el.innerText || '').trim().toLowerCase();
+                        if (!isStamp(text)) continue;
+                        let anc = el.parentElement, nested = false;
+                        while (anc && anc !== root) {
+                            if (matched.has(anc)) { nested = true; break; }
+                            anc = anc.parentElement;
+                        }
+                        matched.add(el);
+                        if (!nested) count++;
                     }
                 }
 
@@ -892,13 +952,20 @@ def check_profile_activity(page, person, config, local_mode=False):
             }
         """)
 
-        is_active = activity_count >= 1
-        person["recent_activity_30d"] = activity_count
-        person["has_recent_activity"] = is_active
-        if is_active:
-            print(f"    [active] {person['name']} — {activity_count} activities in last 3 months")
+        if activity_count < 0:
+            # Section missing — treat as unknown rather than inactive, so a
+            # future LinkedIn change doesn't silently mark everyone inactive.
+            person["recent_activity_30d"] = 0
+            person["has_recent_activity"] = None
+            print(f"    [unknown] {person['name']} — no Activity section on profile, skipping connect")
         else:
-            print(f"    [inactive] {person['name']} — only {activity_count} activity in last 3 months, skipping connect")
+            is_active = activity_count >= 1
+            person["recent_activity_30d"] = activity_count
+            person["has_recent_activity"] = is_active
+            if is_active:
+                print(f"    [active] {person['name']} — {activity_count} activities in last 3 months")
+            else:
+                print(f"    [inactive] {person['name']} — only {activity_count} activity in last 3 months, skipping connect")
 
     except Exception as e:
         print(f"    [activity] Error checking {person['name']}: {e}")
@@ -918,7 +985,7 @@ def send_connection_request(page, person, config):
 
         # ALWAYS navigate to the profile page first to avoid clicking wrong buttons
         print(f"\n    [connect] Navigating to {person['name']}'s profile...")
-        page.goto(person["profile_url"], wait_until="domcontentloaded")
+        goto_linkedin(page, person["profile_url"], "main")
         time.sleep(3)
 
         # Extract first name for aria-label matching
@@ -2180,7 +2247,11 @@ def do_search(playwright, config, auto_connect=False, local_mode=False):
             people = find_people_at_company(page, company, config, seen_profiles,
                                             local_mode=local_mode, location=location)
 
-            if not people:
+            if not people and company.get("lookup_error"):
+                # The lookup itself failed — don't record it as "no contacts",
+                # leave the company for a retry on the next run.
+                print(f"    Lookup failed for {company['name']} — will retry next run")
+            elif not people:
                 # No decision-makers found — add a placeholder so we skip this company next run
                 all_prospects.append({
                     "name": "no_contact_found",
